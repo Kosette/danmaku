@@ -1,6 +1,6 @@
 [package]
 name = "danmaku"
-version = "0.0.0"
+version = "1.6.1"
 edition = "2021"
 rust-version = "1.81"
 
@@ -9,14 +9,20 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1.0"
+futures = "0.3.30"
 hex = "0.4"
 md-5 = "0.10"
 rand = "0.8"
-reqwest = { version = "0.12", features = ["json"] }
+regex = "1.10.6"
+reqwest = { version = "0.12", features = ["json", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.36", features = ["rt-multi-thread", "sync"] }
+tokio = { version = "1.36", features = [
+    "rt-multi-thread",
+    "sync",
+] }
 unicode-segmentation = "1.11"
+url = "2.5.2"
 
 [profile.release]
 opt-level = "s"

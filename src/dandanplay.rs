@@ -1,15 +1,17 @@
-use crate::options::Filter;
+use crate::{
+    emby::get_episode_info,
+    // mpv::osd_message,
+    options::{read_options, Filter},
+};
 use anyhow::{anyhow, Result};
 use hex::encode;
 use md5::{Digest, Md5};
 use reqwest::Client;
 use serde::Deserialize;
+use serde_json::json;
 use std::{
-    collections::HashMap,
-    fs::File,
     hint,
     io::{copy, Read},
-    path::Path,
     sync::{Arc, LazyLock},
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -99,23 +101,91 @@ impl From<&str> for Source {
     }
 }
 
-static CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
+pub(crate) static CLIENT: LazyLock<Client> = LazyLock::new(build);
 
-pub async fn get_danmaku<P: AsRef<Path>>(path: P, filter: Arc<Filter>) -> Result<Vec<Danmaku>> {
-    let file = File::open(&path)?;
-    let mut hasher = Md5::new();
-    // https://api.dandanplay.net/swagger/ui/index
-    copy(&mut file.take(16 * 1024 * 1024), &mut hasher)?;
-    let hash = encode(hasher.finalize());
-    let file_name = path.as_ref().file_name().unwrap().to_str().unwrap();
+fn build() -> reqwest::Client {
+    let (options, _) = read_options()
+        .map_err(|e| crate::log::log_error(&e))
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+
+    // osd_message(&format!(
+    //     "代理: {}\nUA: {}",
+    //     options.proxy, options.user_agent
+    // ));
+
+    if options.proxy.is_empty() {
+        Client::builder()
+            .user_agent(options.user_agent)
+            .build()
+            .expect("Failed to build client")
+    } else {
+        Client::builder()
+            .proxy(reqwest::Proxy::all(options.proxy).unwrap())
+            .user_agent(options.user_agent)
+            .build()
+            .expect("Failed to build client")
+    }
+}
+
+pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>> {
+    // use tokio::fs::File;
+    // use tokio::io::AsyncReadExt;
+
+    let (hash, file_name) = if is_http_link(path) {
+        let hash = get_stream_hash(path).await?;
+        let ep_info = get_episode_info(path).await?;
+
+        if !ep_info.is_empty() {
+            (hash, format!("{}.mp4", ep_info.trim_matches('"')))
+        } else {
+            (hash, "original.mp4".to_string())
+        }
+    } else {
+        // let mut file = File::open(path).await?;
+        // let mut buffer = vec![0u8; 16 * 1024 * 1024];
+
+        // let bytes_read = file.read(&mut buffer).await?;
+        // file.shutdown().await?;
+
+        // buffer.truncate(bytes_read);
+
+        // let mut hasher = Md5::new();
+        // hasher.update(&buffer[..]);
+
+        // let result = hasher.finalize();
+
+        let file = std::fs::File::open(std::path::PathBuf::from(path))?;
+        let mut hasher = Md5::new();
+        copy(&mut file.take(MAX_SIZE as u64), &mut hasher)?;
+        let hash = encode(hasher.finalize());
+
+        let file_name = std::path::Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("original.mp4");
+
+        (hash, file_name.to_string())
+    };
+
+    // osd_message(&format!("文件名: {}\n哈希值: {}", file_name, hash));
+
+    // fileName在fileHash匹配失效之后进行模糊匹配，而本脚本不支持非精确结果，故而fileName做了逻辑简化处理
+    //
+    // 从emby推流链接中提取文件名比较麻烦，且不一定规范，目前拼接为 `名称 S<季>E<集>.mp4`，效果不大
+    let json = json!({
+    "fileName":&file_name,
+    "fileHash":&hash,
+    "fileSize":0,
+    "videoDuration":0,
+    "matchMode":"hashAndFileName"
+    });
 
     let data = CLIENT
         .post("https://api.dandanplay.net/api/v2/match")
         .header("Content-Type", "application/json")
-        .json(&HashMap::from([
-            ("fileName", file_name),
-            ("fileHash", &hash),
-        ]))
+        .json(&json)
         .send()
         .await?
         .json::<MatchResponse>()
@@ -172,4 +242,59 @@ pub async fn get_danmaku<P: AsRef<Path>>(path: P, filter: Arc<Filter>) -> Result
 
     danmaku.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
     Ok(danmaku)
+}
+
+use url::Url;
+
+fn is_http_link(url: &str) -> bool {
+    match Url::parse(url) {
+        Ok(parsed_url) => parsed_url.scheme() == "http" || parsed_url.scheme() == "https",
+        Err(_) => false,
+    }
+}
+
+use futures::StreamExt;
+
+// 设置缓存最大值16MB
+const MAX_SIZE: usize = 16 * 1024 * 1024;
+
+async fn get_stream_hash(path: &str) -> Result<String> {
+    let response = CLIENT.get(path).send().await?;
+
+    // 检查响应状态码
+    if !response.status().is_success() {
+        eprintln!("Failed to fetch file: {:?}", response.status());
+        return Err(anyhow!("Failed to get stream"));
+    }
+
+    // 获取响应的字节流
+    let mut stream = response.bytes_stream();
+
+    let mut downloaded: usize = 0;
+
+    let mut hasher = Md5::new();
+
+    // 遍历下载的数据流，只读取前 16M 数据
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+
+        if downloaded + chunk.len() > MAX_SIZE {
+            let remaining = MAX_SIZE - downloaded;
+            hasher.update(&chunk[..remaining]);
+
+            break;
+        } else {
+            hasher.update(&chunk);
+
+            downloaded += chunk.len();
+        }
+
+        if downloaded >= MAX_SIZE {
+            break;
+        }
+    }
+
+    let result = hasher.finalize();
+
+    Ok(encode(result))
 }

@@ -23,6 +23,8 @@ pub struct Options {
     pub reserved_space: f64,
     pub speed: f64,
     pub no_overlap: bool,
+    pub proxy: &'static str,
+    pub user_agent: &'static str,
 }
 
 impl Default for Options {
@@ -33,6 +35,8 @@ impl Default for Options {
             reserved_space: 0.,
             speed: 1.,
             no_overlap: true,
+            proxy: "",
+            user_agent: "libmpv",
         }
     }
 }
@@ -91,6 +95,12 @@ pub fn read_options() -> Result<Option<(Options, Arc<Filter>)>> {
                     "no" => opts.no_overlap = false,
                     _ => (),
                 },
+                "proxy" if !v.is_empty() && v.starts_with("http") => {
+                    opts.proxy = Box::leak(v.to_string().into_boxed_str());
+                }
+                "user_agent" if !v.is_empty() => {
+                    opts.user_agent = Box::leak(v.to_string().into_boxed_str());
+                }
                 "filter" if !v.is_empty() => filter.keywords.extend(v.split(',').map(Into::into)),
                 "filter_source" if !v.is_empty() => filter.sources.extend(
                     v.split(',')

@@ -1,4 +1,5 @@
 pub mod dandanplay;
+pub mod emby;
 pub mod ffi;
 pub mod log;
 pub mod mpv;
@@ -367,7 +368,8 @@ async fn get(filter: Arc<Filter>) {
     let Some(path) = get_property_string(c"path") else {
         return;
     };
-    match get_danmaku(path, filter).await {
+
+    match get_danmaku(&path, filter).await {
         Ok(danmaku) => {
             let n = danmaku.iter().filter(|c| !c.blocked).count();
             *COMMENTS.lock().await = Some(danmaku);
