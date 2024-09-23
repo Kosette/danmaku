@@ -5,50 +5,74 @@ on:
   push:
     branches:
       - main
-      - ci
     paths-ignore:
-      - '*.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.github/**'
+      - "*.md"
+      - "LICENSE"
+      - ".gitignore"
+      - ".github/**"
   pull_request:
     branches: [main]
     paths-ignore:
-      - '*.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.github/**'
+      - "*.md"
+      - "LICENSE"
+      - ".gitignore"
+      - ".github/**"
 
 jobs:
-  windows:
-    name: Build danmaku on Windows
-    runs-on: windows-latest
+  build-release:
+    env:
+      RUST_BACKTRACE: full
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64-windows-gnu
+            os: windows-latest
+            artifact: danmaku.dll
+          - arch: x86_64-linux-gnu
+            os: windows-latest
+            artifact: danmaku.so
+
+    runs-on: ${{matrix.os}}
+    permissions:
+      contents: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Setup Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Build
-        shell: cmd
+
+      - name: Build danmaku-${{ matrix.arch }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
-          cargo build --release
+          cargo b -r
+          cp target/release/libdanmaku.so danmaku.so
+          tar -czf danmaku-${{ matrix.arch }}.tar.gz danmaku.so
+
+      - name: Build danmaku-${{matrix.arch}}
+        if: ${{ matrix.os == 'windows-latest' }}
+        run: |
+          cargo b -r
+          7z a danmaku-${{ matrix.arch }}.7z target/release/danmaku.dll
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: danmaku-release-windows
-          path: target/release/danmaku.dll
-  linux:
-    name: Build danmaku on Linux
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Build
-        run: |
-          cargo build --release
-          mv target/release/libdanmaku.so target/release/danmaku.so
-      - name: Upload
-        uses: actions/upload-artifact@v4
+          name: danmaku-${{ matrix.arch }}
+          path: target/release/${{ matrix.artifact }}
+
+      - name: Get latest tag name
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        id: tag
+        run: echo "TAG_NAME=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
+
+      - name: Release
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: danmaku-release-linux
-          path: target/release/danmaku.so
+          files: |
+            *.7z
+            *.tar.gz
+          tag_name: ${{ steps.tag.outputs.TAG_NAME }}

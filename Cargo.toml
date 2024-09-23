@@ -1,8 +1,10 @@
 [package]
 name = "danmaku"
-version = "1.6.1"
+version = "1.7.0"
+authors = ["rkscv", "kosette"]
 edition = "2021"
 rust-version = "1.81"
+license = "GPL-3.0"
 
 [lib]
 crate-type = ["cdylib"]

@@ -1,9 +1,9 @@
 use crate::{
-    emby::get_episode_info,
+    emby::{get_episode_info, R},
     // mpv::osd_message,
     options::{read_options, Filter},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Ok, Result};
 use hex::encode;
 use md5::{Digest, Md5};
 use reqwest::Client;
@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::{
     hint,
-    io::{copy, Read},
+    io::Read,
     sync::{Arc, LazyLock},
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -130,76 +130,34 @@ fn build() -> reqwest::Client {
 }
 
 pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>> {
-    // use tokio::fs::File;
-    // use tokio::io::AsyncReadExt;
+    use std::result::Result::Ok;
 
-    let (hash, file_name) = if is_http_link(path) {
-        let hash = get_stream_hash(path).await?;
-        let ep_info = get_episode_info(path).await?;
+    let episode_id = if !is_http_link(path) {
+        let hash = get_localfile_hash(path)?;
+        let file_name = get_localfile_name(path);
 
-        if !ep_info.is_empty() {
-            (hash, format!("{}.mp4", ep_info.trim_matches('"')))
-        } else {
-            (hash, "original.mp4".to_string())
-        }
+        get_episode_id_by_hash(&hash, &file_name).await?
     } else {
-        // let mut file = File::open(path).await?;
-        // let mut buffer = vec![0u8; 16 * 1024 * 1024];
+        let ep_info = get_episode_info(path).await?;
+        let hash = get_stream_hash(path).await?;
 
-        // let bytes_read = file.read(&mut buffer).await?;
-        // file.shutdown().await?;
+        let file_name = format!("{}.mp4", ep_info.name);
 
-        // buffer.truncate(bytes_read);
-
-        // let mut hasher = Md5::new();
-        // hasher.update(&buffer[..]);
-
-        // let result = hasher.finalize();
-
-        let file = std::fs::File::open(std::path::PathBuf::from(path))?;
-        let mut hasher = Md5::new();
-        copy(&mut file.take(MAX_SIZE as u64), &mut hasher)?;
-        let hash = encode(hasher.finalize());
-
-        let file_name = std::path::Path::new(path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("original.mp4");
-
-        (hash, file_name.to_string())
+        if ep_info.status {
+            let epid = get_episode_id_by_hash(&hash, &file_name).await;
+            match epid {
+                Ok(p) => p,
+                Err(_) => get_episode_id_by_info(ep_info).await?,
+            }
+        } else {
+            get_episode_id_by_hash(&hash, &file_name).await?
+        }
     };
-
-    // osd_message(&format!("文件名: {}\n哈希值: {}", file_name, hash));
-
-    // fileName在fileHash匹配失效之后进行模糊匹配，而本脚本不支持非精确结果，故而fileName做了逻辑简化处理
-    //
-    // 从emby推流链接中提取文件名比较麻烦，且不一定规范，目前拼接为 `名称 S<季>E<集>.mp4`，效果不大
-    let json = json!({
-    "fileName":&file_name,
-    "fileHash":&hash,
-    "fileSize":0,
-    "videoDuration":0,
-    "matchMode":"hashAndFileName"
-    });
-
-    let data = CLIENT
-        .post("https://api.dandanplay.net/api/v2/match")
-        .header("Content-Type", "application/json")
-        .json(&json)
-        .send()
-        .await?
-        .json::<MatchResponse>()
-        .await?;
-    if data.matches.len() > 1 {
-        return Err(anyhow!("multiple matching episodes"));
-    } else if !data.is_matched {
-        return Err(anyhow!("no matching episode"));
-    }
 
     let danmaku = CLIENT
         .get(format!(
             "https://api.dandanplay.net/api/v2/comment/{}?withRelated=true",
-            data.matches[0].episode_id
+            episode_id
         ))
         .send()
         .await?
@@ -247,18 +205,20 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
 use url::Url;
 
 fn is_http_link(url: &str) -> bool {
+    use std::result::Result::Ok;
+
     match Url::parse(url) {
         Ok(parsed_url) => parsed_url.scheme() == "http" || parsed_url.scheme() == "https",
         Err(_) => false,
     }
 }
 
-use futures::StreamExt;
-
 // 设置缓存最大值16MB
 const MAX_SIZE: usize = 16 * 1024 * 1024;
 
 async fn get_stream_hash(path: &str) -> Result<String> {
+    use futures::StreamExt;
+
     let response = CLIENT.get(path).send().await?;
 
     // 检查响应状态码
@@ -296,5 +256,136 @@ async fn get_stream_hash(path: &str) -> Result<String> {
 
     let result = hasher.finalize();
 
+    if downloaded < MAX_SIZE {
+        return Err(anyhow!("file too small"));
+    }
+
     Ok(encode(result))
+}
+
+async fn get_episode_id_by_hash(hash: &str, file_name: &str) -> Result<usize> {
+    let json = json!({
+    "fileName":file_name,
+    "fileHash":hash,
+    "matchMode":"hashAndFileName"
+    });
+
+    let data = CLIENT
+        .post("https://api.dandanplay.net/api/v2/match")
+        .header("Content-Type", "application/json")
+        .json(&json)
+        .send()
+        .await?
+        .json::<MatchResponse>()
+        .await?;
+    if !data.is_matched {
+        Err(anyhow!("no matching episode"))
+    } else if data.matches.len() == 1 {
+        Ok(data.matches[0].episode_id)
+    } else {
+        Err(anyhow!("multiple matching episodes"))
+    }
+}
+
+#[derive(Deserialize)]
+struct SearchRes {
+    animes: Vec<Anime>,
+}
+
+#[derive(Deserialize)]
+struct Anime {
+    #[serde(rename = "animeId")]
+    anime_id: u64,
+}
+
+async fn get_episode_id_by_info(ep_info: R) -> Result<usize> {
+    use std::result::Result::Ok;
+    use url::form_urlencoded;
+
+    let ep_type = ep_info.r#type;
+    let ep_snum = ep_info.snum;
+    let ep_num = ep_info.r#enum;
+
+    let encoded_name: String = form_urlencoded::byte_serialize(ep_info.name.as_bytes()).collect();
+
+    let url = format!(
+        "https://api.dandanplay.net/api/v2/search/anime?keyword={}&type={}",
+        encoded_name, ep_type
+    );
+
+    let data = CLIENT
+        .get(url)
+        .header("Content-Type", "application/json")
+        .send()
+        .await?
+        .json::<SearchRes>()
+        .await?;
+
+    if ep_type != "ova" && data.animes.len() < ep_snum as usize {
+        return Err(anyhow!("no matching episode"));
+    };
+
+    // 按季数猜测相应的animeId，拼接上集数作为episodeId，如果是电影则取搜到的第一个结果，
+    //
+    // 如果是特别篇，将tmdb的S0Exx对应的集数作为取animeId的依据，拼接出episodeId
+    //
+    if ep_type != "ova" {
+        let anime_id = data.animes[ep_snum as usize - 1].anime_id;
+        if let Ok(p) = format!("{}{:04}", anime_id, ep_num).parse::<usize>() {
+            Ok(p)
+        } else {
+            Err(anyhow!("no matching episode"))
+        }
+    } else {
+        let anime_id = data.animes[ep_num as usize - 1].anime_id;
+        if let Ok(p) = format!("{}{:04}", anime_id, ep_num).parse::<usize>() {
+            Ok(p)
+        } else {
+            Err(anyhow!("no matching episode"))
+        }
+    }
+}
+
+fn get_localfile_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown.mp4")
+        .to_string()
+}
+
+fn get_localfile_hash(path: &str) -> Result<String> {
+    // use tokio::fs::File;
+    // use tokio::io::AsyncReadExt;
+
+    // let mut file = File::open(path).await?;
+    // let mut buffer = vec![0u8; 16 * 1024 * 1024];
+
+    // let bytes_read = file.read(&mut buffer).await?;
+    // file.shutdown().await?;
+
+    // buffer.truncate(bytes_read);
+
+    // let mut hasher = Md5::new();
+    // hasher.update(&buffer[..]);
+
+    // let result = hasher.finalize();
+    use std::fs::File;
+    use std::path::PathBuf;
+
+    let mut file = File::open(PathBuf::from(path))?;
+
+    let mut buffer = vec![0u8; MAX_SIZE];
+    let bytes_read = file.read(&mut buffer)?;
+
+    if bytes_read < MAX_SIZE {
+        return Err(anyhow!("file too small"));
+    }
+
+    // copy(&mut file.take(MAX_SIZE as u64), &mut hasher)?;
+
+    let mut hasher = Md5::new();
+    hasher.update(&buffer[..bytes_read]);
+
+    Ok(encode(hasher.finalize()))
 }

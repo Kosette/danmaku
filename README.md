@@ -27,8 +27,8 @@ Set the following options in `script-opts/danmaku.conf` to configure the plugin:
 - `reserved_space=0`: the proportion of reserved space at the bottom of the screen, 0.0 to 1.0 (excluded).
 - `speed=1.0`: factor for the speed.
 - `no_overlap=yes`: hide the overlapping danmaku, `yes` or `no`.
-- `proxy=`: add proxy for requests
-- `user_agent=`: add user-agent for network requests
+- `proxy=http://127.0.0.1:8080`: add proxy for requests, default blank
+- `user_agent=libmpv`: add user-agent for network requests, default `libmpv`
 - `filter=keyword1,keyword2`: comma separated keywords, danmaku that contains any of them will be blocked.
 - `filter_source=bilibili,gamer`: comma separated case-insensitive sources (`bilibili`, `gamer`, `acfun`, `qq`, `iqiyi`, `d` or `dandan`), danmaku from any of them will be blocked, runtime updatable via `script-opts` option/property.
 - `filter_bilibili=~~/files/bilibili.json`: filter file exported from bilibili, regex/user based blocking is not supported, double-tilde placeholders are expanded.

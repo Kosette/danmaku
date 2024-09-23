@@ -1,5 +1,5 @@
 use super::dandanplay::CLIENT;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Ok, Result};
 use regex::Regex;
 use url::Url;
 
@@ -78,15 +78,36 @@ pub async fn construct_headers(api_key: &str) -> HeaderMap {
 //         env::var("COMPUTERNAME").unwrap_or_else(|_| "Unknown".to_string())
 //     }
 // }
+pub(crate) struct R {
+    pub r#type: String,
+    pub name: String,
+    pub snum: u64,
+    pub r#enum: u64,
+    pub status: bool,
+}
 
-pub async fn get_episode_info(video_url: &str) -> Result<String> {
+impl Default for R {
+    fn default() -> Self {
+        Self {
+            r#type: "unknown".to_string(),
+            name: "unknown".to_string(),
+            snum: 1,
+            r#enum: 1,
+            status: false,
+        }
+    }
+}
+
+pub(crate) async fn get_episode_info(video_url: &str) -> Result<R> {
+    use std::result::Result::Ok;
+
     let P3 {
         host,
         item_id,
         api_key,
     } = match extract_params(video_url) {
         Ok(p) => p,
-        Err(_) => return Ok("".to_string()),
+        Err(_) => return Ok(R::default()),
     };
 
     let url = format!("{}/emby/Items?Ids={}", host, item_id);
@@ -107,15 +128,31 @@ pub async fn get_episode_info(video_url: &str) -> Result<String> {
         let series_name = &json["Items"][0]["SeriesName"];
         let season = &json["Items"][0]["ParentIndexNumber"];
         let episode = &json["Items"][0]["IndexNumber"];
-        Ok(format!(
-            "{} S{}E{}",
-            series_name.to_string().trim_matches('"'),
-            season.to_string().trim_matches('"'),
-            episode.to_string().trim_matches('"')
-        ))
+        if season == "0" {
+            Ok(R {
+                r#type: "ova".to_string(),
+                name: series_name.to_string(),
+                r#enum: episode.as_u64().unwrap_or(1),
+                status: true,
+                ..Default::default()
+            })
+        } else {
+            Ok(R {
+                r#type: "tvseries".to_string(),
+                name: series_name.to_string(),
+                snum: season.as_u64().unwrap_or(1),
+                r#enum: episode.as_u64().unwrap_or(1),
+                status: true,
+            })
+        }
     } else if json["Items"][0]["Type"] == "Movie" {
-        Ok(json["Items"][0]["Name"].to_string())
+        Ok(R {
+            r#type: "movie".to_string(),
+            name: json["Items"][0]["Name"].to_string(),
+            status: true,
+            ..Default::default()
+        })
     } else {
-        Ok("".to_string())
+        Ok(R::default())
     }
 }
