@@ -3,15 +3,10 @@ name: Build danmaku
 on:
   workflow_dispatch:
   push:
+    tags:
+      - v*
     branches:
       - main
-    paths-ignore:
-      - "*.md"
-      - "LICENSE"
-      - ".gitignore"
-      - ".github/**"
-  pull_request:
-    branches: [main]
     paths-ignore:
       - "*.md"
       - "LICENSE"
@@ -29,7 +24,7 @@ jobs:
             os: windows-latest
             artifact: danmaku.dll
           - arch: x86_64-linux-gnu
-            os: windows-latest
+            os: ubuntu-latest
             artifact: danmaku.so
 
     runs-on: ${{matrix.os}}
@@ -48,6 +43,7 @@ jobs:
         run: |
           cargo b -r
           cp target/release/libdanmaku.so danmaku.so
+          mv target/release/libdanmaku.so target/release/danmaku.so
           tar -czf danmaku-${{ matrix.arch }}.tar.gz danmaku.so
 
       - name: Build danmaku-${{matrix.arch}}
@@ -55,6 +51,7 @@ jobs:
         run: |
           cargo b -r
           7z a danmaku-${{ matrix.arch }}.7z target/release/danmaku.dll
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:

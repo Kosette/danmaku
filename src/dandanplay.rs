@@ -242,6 +242,8 @@ async fn get_stream_hash(path: &str) -> Result<String> {
             let remaining = MAX_SIZE - downloaded;
             hasher.update(&chunk[..remaining]);
 
+            downloaded += chunk.len();
+
             break;
         } else {
             hasher.update(&chunk);
