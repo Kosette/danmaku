@@ -298,6 +298,8 @@ struct SearchRes {
 struct Anime {
     #[serde(rename = "animeId")]
     anime_id: u64,
+    #[serde(rename = "episodeCount")]
+    episode_count: u64,
 }
 
 async fn get_episode_id_by_info(ep_info: R) -> Result<usize> {
@@ -323,28 +325,37 @@ async fn get_episode_id_by_info(ep_info: R) -> Result<usize> {
         .json::<SearchRes>()
         .await?;
 
-    if ep_type != "ova" && data.animes.len() < ep_snum as usize {
+    if data.animes.is_empty() {
         return Err(anyhow!("no matching episode"));
+    }
+
+    let (ani_id, ep_id) = if ep_type == "ova" && data.animes.len() < ep_num as usize {
+        return Err(anyhow!("no matching episode"));
+    } else if ep_type == "ova" {
+        // ova只按照ep_num排序，结果无法预期
+        (data.animes[ep_num as usize - 1].anime_id, ep_num)
+    } else if ep_type == "movie" {
+        // 电影永远只取第一个结果
+        (data.animes[0].anime_id, 1)
+    } else if ep_num > data.animes[ep_snum as usize - 1].episode_count {
+        // 如果两季被tmdb合并为一季，往后顺延，如果中间多次分裂则出错
+        (
+            data.animes[ep_snum as usize].anime_id,
+            ep_num - data.animes[ep_snum as usize - 1].episode_count,
+        )
+    } else if data.animes.len() == (ep_snum - 1) as usize {
+        // 如果当前季数比搜索结果少一季，则猜测是分裂为两季
+        (data.animes[ep_snum as usize - 2].anime_id, ep_num)
+    } else if data.animes.len() < ep_snum as usize {
+        return Err(anyhow!("no matching episode"));
+    } else {
+        (data.animes[ep_snum as usize - 1].anime_id, ep_num)
     };
 
-    // 按季数猜测相应的animeId，拼接上集数作为episodeId，如果是电影则取搜到的第一个结果，
-    //
-    // 如果是特别篇，将tmdb的S0Exx对应的集数作为取animeId的依据，拼接出episodeId
-    //
-    if ep_type != "ova" {
-        let anime_id = data.animes[ep_snum as usize - 1].anime_id;
-        if let Ok(p) = format!("{}{:04}", anime_id, ep_num).parse::<usize>() {
-            Ok(p)
-        } else {
-            Err(anyhow!("no matching episode"))
-        }
+    if let Ok(p) = format!("{}{:04}", ani_id, ep_id).parse::<usize>() {
+        Ok(p)
     } else {
-        let anime_id = data.animes[ep_num as usize - 1].anime_id;
-        if let Ok(p) = format!("{}{:04}", anime_id, ep_num).parse::<usize>() {
-            Ok(p)
-        } else {
-            Err(anyhow!("no matching episode"))
-        }
+        Err(anyhow!("no matching episode"))
     }
 }
 

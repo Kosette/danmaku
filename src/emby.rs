@@ -129,6 +129,7 @@ pub(crate) async fn get_episode_info(video_url: &str) -> Result<R> {
         let season = &json["Items"][0]["ParentIndexNumber"];
         let episode = &json["Items"][0]["IndexNumber"];
         if season == "0" {
+            // tmdb将所有非正番归类为S0特别篇，因此无法很好的跟bangumi对接，这里只能图一乐
             Ok(R {
                 r#type: "ova".to_string(),
                 name: series_name.to_string(),

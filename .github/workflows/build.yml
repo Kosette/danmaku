@@ -50,7 +50,8 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' }}
         run: |
           cargo b -r
-          7z a danmaku-${{ matrix.arch }}.7z target/release/danmaku.dll
+          cp target/release/danmaku.dll danmaku.dll
+          7z a danmaku-${{ matrix.arch }}.7z danmaku.dll
 
       - name: Upload
         uses: actions/upload-artifact@v4
