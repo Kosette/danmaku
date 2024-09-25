@@ -1,12 +1,16 @@
+# Danmaku
+
+## [中文说明](./README_CN.md)
+
 [mpv](https://mpv.io) danmaku plugin powered by [dandanplay API](https://api.dandanplay.net/swagger/ui/index). The plugin sends the name and hash value of the currently playing file to the dandanplay server to get matching danmaku comments.
 
 ## Install
 
-Run:
-
+1. build by yourself
 ```bash
 cargo build --release
 ```
+2. download prebuilt package from [release](https://github.com/Kosette/danmaku/releases/latest)
 
 Copy the `.dll`/`.so` file to the `scripts` subdirectory of your mpv configuration directory.
 
