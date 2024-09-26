@@ -1,6 +1,6 @@
 [package]
 name = "danmaku"
-version = "1.7.20"
+version = "1.7.21"
 authors = ["rkscv", "kosette"]
 edition = "2021"
 rust-version = "1.81"
@@ -23,6 +23,9 @@ tokio = { version = "1.36", features = [
     "rt-multi-thread",
     "sync",
 ] }
+tracing = "0.1.40"
+tracing-appender = "0.2.3"
+tracing-subscriber = { version = "0.3.18", features = ["chrono", "env-filter"] }
 unicode-segmentation = "1.12"
 url = "2.5"
 

@@ -14,6 +14,7 @@ use std::{
     io::Read,
     sync::{Arc, LazyLock},
 };
+use tracing::{error, info};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub struct StatusInner {
@@ -128,6 +129,8 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
     use std::result::Result::Ok;
 
     let episode_id = if !is_http_link(path) {
+        info!("Now playing non HTTP(s) files");
+
         let hash = get_localfile_hash(path)?;
         let file_name = get_localfile_name(path);
 
@@ -135,14 +138,17 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
     } else {
         let ep_info = get_episode_info(path).await?;
 
+        info!("Now streaming from: {}", path);
+        info!("Episode info: {}", ep_info);
+
         let file_name = format!("{}.mp4", ep_info.name);
         if ep_info.status {
             let epid = get_episode_id_by_info(ep_info, path).await;
 
             match epid {
                 Ok(p) => p,
-                Err(e) => {
-                    osd_message(&format!("Error: {}, trying matching with video hash", e));
+                Err(_) => {
+                    osd_message("trying matching with video hash");
                     get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name).await?
                 }
             }
@@ -223,8 +229,12 @@ async fn get_stream_hash(path: &str) -> Result<String> {
 
     // check status Code
     if !response.status().is_success() {
-        eprintln!("Failed to fetch file: {:?}", response.status());
-        return Err(anyhow!("Failed to get stream"));
+        error!(
+            "Failed to fetch data from server, Status: {}",
+            response.status()
+        );
+
+        return Err(anyhow!("Failed to fetch data from server"));
     }
 
     let mut stream = response.bytes_stream();
@@ -258,8 +268,11 @@ async fn get_stream_hash(path: &str) -> Result<String> {
     let result = hasher.finalize();
 
     if downloaded < MAX_SIZE {
+        error!("File too small, less than 16MiB");
         return Err(anyhow!("file too small"));
     }
+
+    info!("Get streaming file hash: {}", encode(result));
 
     Ok(encode(result))
 }
@@ -279,16 +292,27 @@ async fn get_episode_id_by_hash(hash: &str, file_name: &str) -> Result<usize> {
         .await?;
 
     if !res.status().is_success() {
+        error!("Failed to matching by hash, Status: {:?}", res.status());
+
         return Err(anyhow!("failed to match with hash"));
     }
 
     let data = res.json::<MatchResponse>().await?;
 
     if !data.is_matched {
+        error!("No matching result by hash");
+
         Err(anyhow!("no matching episode"))
     } else if data.matches.len() == 1 {
+        info!(
+            "Success, matching episode id: {}",
+            data.matches[0].episode_id
+        );
+
         Ok(data.matches[0].episode_id)
     } else {
+        error!("Too many results");
+
         Err(anyhow!("multiple matching episodes"))
     }
 }
@@ -332,16 +356,25 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
         .await?;
 
     if !res.status().is_success() {
+        error!(
+            "Failed to searching by keywords, Status: {:?}",
+            res.status()
+        );
+
         return Err(anyhow!("failed to search series, try again later"));
     }
 
     let data = res.json::<SearchRes>().await?;
 
     if data.animes.is_empty() {
+        error!("No matching result");
+
         return Err(anyhow!("no matching episode with info"));
     }
 
     if ep_type == "ova" && data.animes.len() < ep_num as usize {
+        error!("No matching OVA");
+
         return Err(anyhow!("no matching episode with info"));
     };
 
@@ -350,37 +383,55 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
     if ep_type == "ova" {
         // ova只按照ep_num排序，结果无法预期
         (ani_id, ep_id) = (data.animes[ep_num as usize - 1].anime_id, ep_num);
+
+        info!("Success, ova episode id: {}{:04}", ani_id, ep_id);
+
         return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     };
 
     if ep_type == "movie" {
         // 电影永远只取第一个结果
         (ani_id, ep_id) = (data.animes[0].anime_id, 1u64);
+
+        info!("Success, movie episode id: {}{:04}", ani_id, ep_id);
+
         return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     };
 
     let ep_num_list = get_series_info(video_url, &sid).await?;
 
     if ep_num_list.is_empty() {
+        error!("Ooops, series info fetching from Emby is empty");
+
         return Err(anyhow!("no matching episode with info"));
     }
 
     // 如果季数匹配，则直接返回结果
     if data.animes.len() as u64 == ep_num_list.last().unwrap().0 {
         (ani_id, ep_id) = (data.animes[ep_snum as usize - 1].anime_id, ep_num);
+
+        info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
+
         return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     };
 
     if get_dan_sum(&data.animes, ep_snum)? == get_em_sum(&ep_num_list, ep_snum)? {
         (ani_id, ep_id) = (data.animes[ep_snum as usize - 1].anime_id, ep_num);
+
+        info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
+
         return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     }
 
     if ep_num_list[0].0 != 1 && (ep_snum as u64) != ep_num_list.last().unwrap().0 {
+        error!("Hard to decide, insufficient info");
+
         return Err(anyhow!("need more info, skip"));
     }
 
     if ep_num_list[0].0 != 1 && (data.animes.len() as u64) < ep_num_list.last().unwrap().0 {
+        error!("Hard to decide, insufficient info");
+
         return Err(anyhow!("need more info, skip"));
     }
 
@@ -388,6 +439,8 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
         && data.animes[ep_snum as usize].episode_count == ep_num_list.last().unwrap().1
     {
         (ani_id, ep_id) = (data.animes[ep_snum as usize].anime_id, ep_num);
+        info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
+
         return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     }
 
@@ -398,23 +451,31 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
     {
         if ep_num <= data.animes[ep_snum as usize - 1].episode_count {
             (ani_id, ep_id) = (data.animes[ep_snum as usize - 1].anime_id, ep_num);
+            info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
+
             return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
         } else {
             (ani_id, ep_id) = (
                 data.animes[ep_snum as usize].anime_id,
                 ep_num - data.animes[ep_snum as usize - 1].episode_count,
             );
+            info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
+
             return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
         }
     }
 
     if ep_num_list[0].0 != 1 {
+        error!("Hard to decide, insufficient info");
+
         return Err(anyhow!("need more info, skip"));
     }
 
     if get_dan_sum(&data.animes, data.animes.len() as i64)?
         != get_em_sum(&ep_num_list, ep_num_list.len() as i64)?
     {
+        error!("Hard to decide, insufficient info");
+
         return Err(anyhow!("need more info, skip"));
     }
 
@@ -485,8 +546,9 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
                             );
                             break 'outer;
                         }
+                        error!("Too many results");
 
-                        return Err(anyhow!("too much results"));
+                        return Err(anyhow!("too many results"));
                     }
                 }
             }
@@ -527,8 +589,10 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
     }
 
     if (ani_id, ep_id) == (0, 0) {
+        error!("No matching result");
         return Err(anyhow!("not matching episode with info"));
     }
+    info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
 
     Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?)
 }
@@ -583,6 +647,7 @@ fn get_localfile_hash(path: &str) -> Result<String> {
     let bytes_read = file.read(&mut buffer)?;
 
     if bytes_read < MAX_SIZE {
+        error!("File too small, less than 16MiB");
         return Err(anyhow!("file too small"));
     }
 
@@ -591,24 +656,3 @@ fn get_localfile_hash(path: &str) -> Result<String> {
 
     Ok(encode(hasher.finalize()))
 }
-
-// Debug
-//
-// pub async fn log_to_file(info: &str) -> Result<()> {
-//     use std::path::PathBuf;
-//     use tokio::io::AsyncWriteExt;
-
-//     let path = "~~/files/danmu.log";
-//     let log_file = PathBuf::from(expand_path(path)?);
-
-//     let mut file = tokio::fs::OpenOptions::new()
-//         .write(true)
-//         .append(true)
-//         .create(true)
-//         .open(log_file)
-//         .await?;
-
-//     file.write_all(info.as_bytes()).await?;
-
-//     Ok(())
-// }

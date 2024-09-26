@@ -1,7 +1,10 @@
+use std::fmt::Display;
+
 use super::dandanplay::CLIENT;
 use anyhow::{anyhow, Context, Ok, Result};
 use regex::Regex;
 use serde::Deserialize;
+use tracing::{error, info};
 use url::Url;
 
 #[derive(Debug)]
@@ -13,6 +16,10 @@ pub(crate) struct P3 {
 
 pub(crate) fn extract_params(video_url: &str) -> Result<P3> {
     let url = Url::parse(video_url)?;
+
+    if url.host_str().is_none() {
+        error!("Host not found");
+    }
 
     // host
     let host = format!(
@@ -27,6 +34,7 @@ pub(crate) fn extract_params(video_url: &str) -> Result<P3> {
         .find(|(key, _)| key == "api_key")
         .map(|(_, value)| value)
     else {
+        error!("api_key not founf");
         return Err(anyhow!("api_key not found"));
     };
 
@@ -36,6 +44,7 @@ pub(crate) fn extract_params(video_url: &str) -> Result<P3> {
     let item_id = if let Some(captures) = pattern.captures(url.path()) {
         String::from(&captures[1])
     } else {
+        error!("ItemId not found");
         return Err(anyhow!("item_id not found"));
     };
 
@@ -66,6 +75,17 @@ impl Default for EpInfo {
             ss_id: "0".to_string(),
             status: false,
         }
+    }
+}
+
+impl Display for EpInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = format!(
+            "[Type: {}  Name: {}  Season Number: {}  Episode Number: {}  SeriesId: {}  Status: {}]",
+            self.r#type, self.name, self.sn_index, self.ep_index, self.ss_id, self.status
+        );
+
+        write!(f, "{}", str)
     }
 }
 
@@ -125,6 +145,11 @@ pub(crate) async fn get_episode_info(video_url: &str) -> Result<EpInfo> {
         .await?;
 
     if !response.status().is_success() {
+        error!(
+            "Failed to fetch ep info from Emby server, Status: {:?}",
+            response.status()
+        );
+
         return Err(anyhow!(
             "fetch episode info error, status: {:?}",
             response.status()
@@ -211,6 +236,11 @@ pub(crate) async fn get_series_info(video_url: &str, series_id: &str) -> Result<
         .await?;
 
     if !res.status().is_success() {
+        error!(
+            "Failed to fetch seasons info from Emby server, Status: {:?}",
+            res.status()
+        );
+
         return Err(anyhow!(
             "fetch seasons info error, status: {}",
             res.status()
@@ -240,6 +270,11 @@ pub(crate) async fn get_series_info(video_url: &str, series_id: &str) -> Result<
                 .await?;
 
             if !res.status().is_success() {
+                error!(
+                    "Failed to fetch episodes info from Emby server, Status: {}",
+                    res.status()
+                );
+
                 return Err(anyhow!(
                     "fetch episodes info error, status: {}",
                     res.status()
@@ -262,6 +297,7 @@ pub(crate) async fn get_series_info(video_url: &str, series_id: &str) -> Result<
             episodes_list.push((season.season_num, sum));
         }
     }
+    info!("Episodes list: {:?}", episodes_list);
 
     Ok(episodes_list)
 }

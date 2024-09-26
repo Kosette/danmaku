@@ -25,6 +25,7 @@ pub struct Options {
     pub no_overlap: bool,
     pub proxy: &'static str,
     pub user_agent: &'static str,
+    pub log: &'static str,
 }
 
 impl Default for Options {
@@ -37,6 +38,7 @@ impl Default for Options {
             no_overlap: true,
             proxy: "",
             user_agent: "libmpv",
+            log: "false",
         }
     }
 }
@@ -100,6 +102,9 @@ pub fn read_options() -> Result<Option<(Options, Arc<Filter>)>> {
                 }
                 "user_agent" if !v.is_empty() => {
                     opts.user_agent = Box::leak(v.to_string().into_boxed_str());
+                }
+                "log" if !v.is_empty() => {
+                    opts.log = Box::leak(v.to_string().into_boxed_str());
                 }
                 "filter" if !v.is_empty() => filter.keywords.extend(v.split(',').map(Into::into)),
                 "filter_source" if !v.is_empty() => filter.sources.extend(

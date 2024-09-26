@@ -16,10 +16,12 @@ use crate::{
     options::{read_options, Filter, Options},
 };
 use anyhow::anyhow;
+use mpv::expand_path;
 use rand::{thread_rng, Rng};
 use std::{
     collections::HashSet,
     ffi::CStr,
+    fs,
     os::raw::c_int,
     ptr::null_mut,
     slice::from_raw_parts,
@@ -29,6 +31,11 @@ use std::{
     },
 };
 use tokio::{runtime::Builder, spawn, sync::Mutex};
+
+use tracing::Level;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::fmt::time::ChronoUtc;
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 const MAX_DURATION: f64 = 12.;
 const INTERVAL: f64 = 0.005;
@@ -83,6 +90,37 @@ async fn main() -> c_int {
         .ok()
         .flatten()
         .unwrap_or_default();
+
+    // Initialize tracing subscriber
+    if ["true", "on", "enable"].contains(&options.log) {
+        let log_dir = expand_path("~~/files").expect("can not expand log_dir");
+
+        if !std::path::Path::new(&log_dir).exists() {
+            fs::create_dir_all(&log_dir)
+                .unwrap_or_else(|_| panic!("create log_dir: {} failed", &log_dir));
+        }
+
+        let filter = EnvFilter::from_default_env().add_directive(Level::INFO.into());
+        let file_appender = RollingFileAppender::new(Rotation::NEVER, log_dir, "danmu.log");
+
+        let file_layer = fmt::layer()
+            .with_writer(file_appender)
+            .with_ansi(false)
+            .with_timer(ChronoUtc::rfc_3339());
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(file_layer)
+            .init();
+    } else {
+        let filter = EnvFilter::from_default_env().add_directive(Level::INFO.into());
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt::layer().with_timer(ChronoUtc::rfc_3339()))
+            .init();
+    }
+
     let mut handle = spawn(async {});
     let mut params = Params::default();
     let mut pause = true;
