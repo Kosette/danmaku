@@ -1,5 +1,5 @@
 use super::dandanplay::CLIENT;
-use anyhow::{anyhow, Ok, Result};
+use anyhow::{anyhow, Context, Ok, Result};
 use regex::Regex;
 use serde::Deserialize;
 use url::Url;
@@ -12,7 +12,7 @@ pub(crate) struct P3 {
 }
 
 pub(crate) fn extract_params(video_url: &str) -> Result<P3> {
-    let url = Url::parse(video_url).unwrap();
+    let url = Url::parse(video_url)?;
 
     // host
     let host = format!(
@@ -30,7 +30,7 @@ pub(crate) fn extract_params(video_url: &str) -> Result<P3> {
         return Err(anyhow!("api_key not found"));
     };
 
-    let pattern = Regex::new(r"^.*/videos/(\d+)/.*").unwrap();
+    let pattern = Regex::new(r"^.*/videos/(\d+)/.*")?;
 
     // item_id
     let item_id = if let Some(captures) = pattern.captures(url.path()) {
@@ -113,7 +113,7 @@ pub(crate) async fn get_episode_info(video_url: &str) -> Result<EpInfo> {
         api_key,
     } = match extract_params(video_url) {
         Ok(p) => p,
-        Err(e) => return Err(anyhow!(format!("Error: {}", e))),
+        Err(_) => return Ok(EpInfo::default()),
     };
 
     let url = format!("{}/emby/Items?Ids={}&reqformat=json", host, item_id);
@@ -131,7 +131,10 @@ pub(crate) async fn get_episode_info(video_url: &str) -> Result<EpInfo> {
         ));
     }
 
-    let epdata = response.json::<EpData>().await?;
+    let epdata = response
+        .json::<EpData>()
+        .await
+        .context("can not parse episode info")?;
 
     if epdata.items[0].r#type == "Episode" {
         if epdata.items[0].s_index == 0 {
@@ -195,10 +198,7 @@ struct Episode {
 pub(crate) async fn get_series_info(video_url: &str, series_id: &str) -> Result<Vec<u64>> {
     use std::result::Result::Ok;
 
-    let P3 { host, api_key, .. } = match extract_params(video_url) {
-        Ok(p) => p,
-        Err(e) => return Err(anyhow!(format!("Error: {}", e))),
-    };
+    let P3 { host, api_key, .. } = extract_params(video_url).context("not emby url")?;
 
     let seasons_url = format!("{}/emby/Shows/{}/Seasons?reqformat=json", host, series_id);
 
@@ -209,13 +209,16 @@ pub(crate) async fn get_series_info(video_url: &str, series_id: &str) -> Result<
         .await?;
 
     if !res.status().is_success() {
-        return Err(anyhow!(format!(
+        return Err(anyhow!(
             "fetch seasons info error, status: {}",
             res.status()
-        )));
+        ));
     }
 
-    let seasons = res.json::<Seasons>().await?;
+    let seasons = res
+        .json::<Seasons>()
+        .await
+        .context("can not parse seasons info")?;
 
     let mut episodes_list: Vec<u64> = Vec::new();
 
@@ -234,13 +237,16 @@ pub(crate) async fn get_series_info(video_url: &str, series_id: &str) -> Result<
                 .await?;
 
             if !res.status().is_success() {
-                return Err(anyhow!(format!(
+                return Err(anyhow!(
                     "fetch episodes info error, status: {}",
                     res.status()
-                )));
+                ));
             }
 
-            let episodes = res.json::<Episodes>().await?;
+            let episodes = res
+                .json::<Episodes>()
+                .await
+                .context("can not parse episodes info")?;
 
             let mut sum = 0;
             for ep in episodes.items {

@@ -58,7 +58,7 @@ jobs:
         with:
           name: danmaku-${{ matrix.arch }}
           path: target/release/${{ matrix.artifact }}
-          retention_days: 3
+          retention-days: 3
           if-no-files-found: error
 
       - name: Get latest tag name
