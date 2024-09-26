@@ -134,14 +134,15 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
         get_episode_id_by_hash(&hash, &file_name).await?
     } else {
         let ep_info = get_episode_info(path).await?;
-        let file_name = format!("{}.mp4", ep_info.name);
 
+        let file_name = format!("{}.mp4", ep_info.name);
         if ep_info.status {
             let epid = get_episode_id_by_info(ep_info, path).await;
+
             match epid {
                 Ok(p) => p,
-                Err(_) => {
-                    osd_message("last try, matching with video hash");
+                Err(e) => {
+                    osd_message(&format!("Error: {}, trying matching with video hash", e));
                     get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name).await?
                 }
             }
@@ -161,6 +162,7 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
         .json::<CommentResponse>()
         .await?
         .comments;
+
     let sources_rt = filter.sources_rt.lock().await;
     let mut danmaku = danmaku
         .into_iter()
@@ -196,6 +198,7 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
         .collect::<Vec<_>>();
 
     danmaku.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+
     Ok(danmaku)
 }
 
@@ -210,7 +213,7 @@ fn is_http_link(url: &str) -> bool {
     }
 }
 
-// 设置缓存最大值16MB
+// Set Limit of buffer size
 const MAX_SIZE: usize = 16 * 1024 * 1024;
 
 async fn get_stream_hash(path: &str) -> Result<String> {
@@ -218,20 +221,19 @@ async fn get_stream_hash(path: &str) -> Result<String> {
 
     let response = CLIENT.get(path).send().await?;
 
-    // 检查响应状态码
+    // check status Code
     if !response.status().is_success() {
         eprintln!("Failed to fetch file: {:?}", response.status());
         return Err(anyhow!("Failed to get stream"));
     }
 
-    // 获取响应的字节流
     let mut stream = response.bytes_stream();
 
     let mut downloaded: usize = 0;
 
     let mut hasher = Md5::new();
 
-    // 遍历下载的数据流，只读取前 16M 数据
+    // Read first 16MiB chunk
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
 
@@ -269,14 +271,19 @@ async fn get_episode_id_by_hash(hash: &str, file_name: &str) -> Result<usize> {
     "matchMode":"hashAndFileName"
     });
 
-    let data = CLIENT
+    let res = CLIENT
         .post("https://api.dandanplay.net/api/v2/match")
         .header("Content-Type", "application/json")
         .json(&json)
         .send()
-        .await?
-        .json::<MatchResponse>()
         .await?;
+
+    if !res.status().is_success() {
+        return Err(anyhow!("failed to match with hash"));
+    }
+
+    let data = res.json::<MatchResponse>().await?;
+
     if !data.is_matched {
         Err(anyhow!("no matching episode"))
     } else if data.matches.len() == 1 {
@@ -286,12 +293,12 @@ async fn get_episode_id_by_hash(hash: &str, file_name: &str) -> Result<usize> {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct SearchRes {
     animes: Vec<Anime>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct Anime {
     #[serde(rename = "animeId")]
     anime_id: u64,
@@ -315,13 +322,17 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
         encoded_name, ep_type
     );
 
-    let data = CLIENT
+    let res = CLIENT
         .get(url)
         .header("Content-Type", "application/json")
         .send()
-        .await?
-        .json::<SearchRes>()
         .await?;
+
+    if !res.status().is_success() {
+        return Err(anyhow!("failed to search series, try again later"));
+    }
+
+    let data = res.json::<SearchRes>().await?;
 
     if data.animes.is_empty() {
         return Err(anyhow!("no matching episode"));
@@ -343,7 +354,7 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
         (ani_id, ep_id) = (data.animes[0].anime_id, 1u64);
     };
 
-    let ep_num_list = get_series_info(video_url, sid).await?;
+    let ep_num_list = get_series_info(video_url, &sid).await?;
 
     // 如果季数匹配，则直接返回结果
     if data.animes.len() == ep_num_list.len() {
@@ -529,3 +540,24 @@ fn get_localfile_hash(path: &str) -> Result<String> {
 
     Ok(encode(hasher.finalize()))
 }
+
+// Debug
+//
+// pub async fn log_to_file(info: &str) -> Result<()> {
+//     use std::path::PathBuf;
+//     use tokio::io::AsyncWriteExt;
+
+//     let path = "~~/files/danmu.log";
+//     let log_file = PathBuf::from(expand_path(path)?);
+
+//     let mut file = tokio::fs::OpenOptions::new()
+//         .write(true)
+//         .append(true)
+//         .create(true)
+//         .open(log_file)
+//         .await?;
+
+//     file.write_all(info.as_bytes()).await?;
+
+//     Ok(())
+// }
