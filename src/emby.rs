@@ -1,6 +1,8 @@
 use super::dandanplay::CLIENT;
 use anyhow::{anyhow, Ok, Result};
 use regex::Regex;
+use serde::Deserialize;
+use serde_json::Value;
 use url::Url;
 
 pub(crate) struct P3 {
@@ -15,7 +17,7 @@ pub(crate) fn extract_params(video_url: &str) -> Result<P3> {
     let host = format!(
         "{}://{}",
         url.scheme(),
-        url.host_str().expect("没有找到主机名")
+        url.host_str().expect("host not found")
     );
 
     // 提取 api_key
@@ -43,62 +45,29 @@ pub(crate) fn extract_params(video_url: &str) -> Result<P3> {
     })
 }
 
-use reqwest::header::{HeaderMap, HeaderValue};
-use serde_json::Value;
-// use std::env;
-
-// 构造请求标头
-pub async fn construct_headers(api_key: &str) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-
-    headers.insert("X-Emby-Token", HeaderValue::from_str(api_key).unwrap());
-    // headers.insert(
-    //     "X-Emby-Device-Id",
-    //     HeaderValue::from_str(&env::var("DEVICE_ID").unwrap().to_string()).unwrap(),
-    // );
-    // headers.insert(
-    //     "X-Emby-Device-Name",
-    //     HeaderValue::from_str(&get_device_name()).unwrap(),
-    // );
-
-    headers
-}
-
-// fn get_device_name() -> String {
-//     // 尝试在类 Unix 系统上获取主机名
-//     #[cfg(unix)]
-//     {
-//         env::var("HOSTNAME").unwrap_or_else(|_| "Unknown".to_string())
-//     }
-
-//     // 尝试在 Windows 系统上获取主机名
-//     // 如果是 Windows 系统，使用 "COMPUTERNAME" 环境变量
-//     #[cfg(windows)]
-//     {
-//         env::var("COMPUTERNAME").unwrap_or_else(|_| "Unknown".to_string())
-//     }
-// }
-pub(crate) struct R {
+pub(crate) struct EpInfo {
     pub r#type: String,
     pub name: String,
-    pub snum: u64,
-    pub r#enum: u64,
+    pub sn_index: i64,
+    pub ep_index: u64,
+    pub ss_id: u64,
     pub status: bool,
 }
 
-impl Default for R {
+impl Default for EpInfo {
     fn default() -> Self {
         Self {
             r#type: "unknown".to_string(),
             name: "unknown".to_string(),
-            snum: 1,
-            r#enum: 1,
+            sn_index: 1,
+            ep_index: 1,
+            ss_id: 1,
             status: false,
         }
     }
 }
 
-pub(crate) async fn get_episode_info(video_url: &str) -> Result<R> {
+pub(crate) async fn get_episode_info(video_url: &str) -> Result<EpInfo> {
     use std::result::Result::Ok;
 
     let P3 {
@@ -107,19 +76,19 @@ pub(crate) async fn get_episode_info(video_url: &str) -> Result<R> {
         api_key,
     } = match extract_params(video_url) {
         Ok(p) => p,
-        Err(_) => return Ok(R::default()),
+        Err(e) => return Err(e),
     };
 
-    let url = format!("{}/emby/Items?Ids={}", host, item_id);
+    let url = format!("{}/emby/Items?Ids={}&reqformat=json", host, item_id);
 
     let response = CLIENT
         .get(url)
-        .headers(construct_headers(&api_key).await)
+        .header("X-Emby-Token", api_key)
         .send()
         .await?;
 
     if !response.status().is_success() {
-        return Err(anyhow!("request chapter info failed"));
+        return Err(anyhow!("request episode info failed"));
     }
 
     let json: Value = response.json().await?;
@@ -128,32 +97,116 @@ pub(crate) async fn get_episode_info(video_url: &str) -> Result<R> {
         let series_name = &json["Items"][0]["SeriesName"];
         let season = &json["Items"][0]["ParentIndexNumber"];
         let episode = &json["Items"][0]["IndexNumber"];
+        let series_id = &json["Items"][0]["SeriesId"];
+
         if season == "0" {
             // tmdb将所有非正番归类为S0特别篇，因此无法很好的跟bangumi对接，这里只能图一乐
-            Ok(R {
+            Ok(EpInfo {
                 r#type: "ova".to_string(),
                 name: series_name.to_string(),
-                r#enum: episode.as_u64().unwrap_or(1),
+                ep_index: episode.as_u64().unwrap_or(1),
                 status: true,
                 ..Default::default()
             })
         } else {
-            Ok(R {
+            Ok(EpInfo {
                 r#type: "tvseries".to_string(),
                 name: series_name.to_string(),
-                snum: season.as_u64().unwrap_or(1),
-                r#enum: episode.as_u64().unwrap_or(1),
+                sn_index: season.as_i64().unwrap_or(1),
+                ep_index: episode.as_u64().unwrap_or(1),
+                ss_id: series_id.as_u64().unwrap_or(1),
                 status: true,
             })
         }
     } else if json["Items"][0]["Type"] == "Movie" {
-        Ok(R {
+        Ok(EpInfo {
             r#type: "movie".to_string(),
             name: json["Items"][0]["Name"].to_string(),
             status: true,
             ..Default::default()
         })
     } else {
-        Ok(R::default())
+        Ok(EpInfo::default())
     }
+}
+
+#[derive(Deserialize)]
+struct Seasons {
+    #[serde(rename = "Items")]
+    items: Vec<Season>,
+}
+
+#[derive(Deserialize)]
+struct Season {
+    #[serde(rename = "Id")]
+    season_id: u64,
+    #[serde(rename = "IndexNumber")]
+    season_num: u64,
+}
+
+#[derive(Deserialize)]
+struct Episodes {
+    #[serde(rename = "Items")]
+    items: Vec<Episode>,
+}
+
+#[derive(Deserialize)]
+struct Episode {
+    #[serde(rename = "ParentIndexNumber")]
+    season_num: u64,
+}
+
+/// 获取番剧每季度对应剧集数的数组，排除S0
+///
+pub(crate) async fn get_series_info(video_url: &str, series_id: u64) -> Result<Vec<u64>> {
+    use std::result::Result::Ok;
+
+    let P3 { host, api_key, .. } = match extract_params(video_url) {
+        Ok(p) => p,
+        Err(e) => return Err(e),
+    };
+
+    let seasons_url = format!("{}/emby/Shows/{}/Seasons?reqformat=json", host, series_id);
+    let seasons = CLIENT
+        .get(seasons_url)
+        .header("X-Emby-Token", &api_key)
+        .send()
+        .await?
+        .json::<Seasons>()
+        .await?;
+
+    let mut seasonid_list: Vec<u64> = Vec::new();
+
+    for season in seasons.items {
+        if season.season_num != 0 {
+            seasonid_list.push(season.season_id);
+        }
+    }
+
+    let mut episode_list: Vec<u64> = Vec::new();
+
+    for sid in seasonid_list {
+        let episodes_url = format!(
+            "{}/emby/Shows/{}/Episodes?SeasonId={}&reqformat=json",
+            host, series_id, sid
+        );
+
+        let episodes = CLIENT
+            .get(episodes_url)
+            .header("X-Emby-Token", &api_key)
+            .send()
+            .await?
+            .json::<Episodes>()
+            .await?;
+
+        let mut ep_num = 0u64;
+        for ep in episodes.items {
+            if ep.season_num != 0 {
+                ep_num += 1;
+            }
+        }
+        episode_list.push(ep_num);
+    }
+
+    Ok(episode_list)
 }
