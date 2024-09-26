@@ -175,38 +175,34 @@ pub(crate) async fn get_series_info(video_url: &str, series_id: u64) -> Result<V
         .json::<Seasons>()
         .await?;
 
-    let mut seasonid_list: Vec<u64> = Vec::new();
+    let mut episodes_list: Vec<u64> = Vec::new();
 
     for season in seasons.items {
         if season.season_num != 0 {
-            seasonid_list.push(season.season_id);
-        }
-    }
+            let sid = season.season_id;
 
-    let mut episode_list: Vec<u64> = Vec::new();
+            let episodes_url = format!(
+                "{}/emby/Shows/{}/Episodes?SeasonId={}&reqformat=json",
+                host, series_id, sid
+            );
+            let episodes = CLIENT
+                .get(episodes_url)
+                .header("X-Emby-Token", &api_key)
+                .send()
+                .await?
+                .json::<Episodes>()
+                .await?;
 
-    for sid in seasonid_list {
-        let episodes_url = format!(
-            "{}/emby/Shows/{}/Episodes?SeasonId={}&reqformat=json",
-            host, series_id, sid
-        );
-
-        let episodes = CLIENT
-            .get(episodes_url)
-            .header("X-Emby-Token", &api_key)
-            .send()
-            .await?
-            .json::<Episodes>()
-            .await?;
-
-        let mut ep_num = 0u64;
-        for ep in episodes.items {
-            if ep.season_num != 0 {
-                ep_num += 1;
+            let mut sum = 0;
+            for ep in episodes.items {
+                if ep.season_num != 0 {
+                    sum += 1;
+                }
             }
+
+            episodes_list.push(sum);
         }
-        episode_list.push(ep_num);
     }
 
-    Ok(episode_list)
+    Ok(episodes_list)
 }

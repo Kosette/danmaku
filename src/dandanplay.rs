@@ -1,5 +1,6 @@
 use crate::{
     emby::{get_episode_info, get_series_info, EpInfo},
+    mpv::osd_message,
     options::{read_options, Filter},
 };
 use anyhow::{anyhow, Ok, Result};
@@ -133,18 +134,20 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
         get_episode_id_by_hash(&hash, &file_name).await?
     } else {
         let ep_info = get_episode_info(path).await?;
-        let hash = get_stream_hash(path).await?;
-
         let file_name = format!("{}.mp4", ep_info.name);
 
         if ep_info.status {
-            let epid = get_episode_id_by_hash(&hash, &file_name).await;
+            let epid = get_episode_id_by_info(ep_info, path).await;
             match epid {
                 Ok(p) => p,
-                Err(_) => get_episode_id_by_info(ep_info, path).await?,
+                Err(_) => {
+                    osd_message("last try, matching with video hash");
+                    get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name).await?
+                }
             }
         } else {
-            get_episode_id_by_hash(&hash, &file_name).await?
+            osd_message("matching with video hash");
+            get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name).await?
         }
     };
 
