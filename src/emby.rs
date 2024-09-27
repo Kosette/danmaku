@@ -191,11 +191,13 @@ struct Episodes {
 struct Episode {
     #[serde(rename = "ParentIndexNumber")]
     season_num: u64,
+    #[serde(rename = "IndexNumber")]
+    ep_num: u64,
 }
 
-/// a list containing number of episodes of every season except S0
+/// a list containing number of episodes and season number of every season except S0
 ///
-pub(crate) async fn get_series_info(video_url: &str, series_id: &str) -> Result<Vec<u64>> {
+pub(crate) async fn get_series_info(video_url: &str, series_id: &str) -> Result<Vec<(u64, u64)>> {
     use std::result::Result::Ok;
 
     let P3 { host, api_key, .. } = extract_params(video_url).context("not emby url")?;
@@ -220,10 +222,11 @@ pub(crate) async fn get_series_info(video_url: &str, series_id: &str) -> Result<
         .await
         .context("can not parse seasons info")?;
 
-    let mut episodes_list: Vec<u64> = Vec::new();
+    let mut episodes_list: Vec<(u64, u64)> = Vec::new();
 
     for season in seasons.items {
-        if season.season_num != 0 {
+        // shit
+        if season.season_num != 0 && season.season_num > episodes_list.last().unwrap_or(&(0, 0)).0 {
             let sid = season.season_id;
 
             let episodes_url = format!(
@@ -250,12 +253,13 @@ pub(crate) async fn get_series_info(video_url: &str, series_id: &str) -> Result<
 
             let mut sum = 0;
             for ep in episodes.items {
-                if ep.season_num != 0 {
+                // shit
+                if ep.season_num != 0 && ep.ep_num > sum {
                     sum += 1;
                 }
             }
 
-            episodes_list.push(sum);
+            episodes_list.push((season.season_num, sum));
         }
     }
 

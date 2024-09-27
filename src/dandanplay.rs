@@ -306,6 +306,9 @@ struct Anime {
     episode_count: u64,
 }
 
+// total shit
+// shitshitshitshitshitshitshitshitshitshitshit
+//
 async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usize> {
     use std::result::Result::Ok;
     use url::form_urlencoded;
@@ -335,31 +338,85 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
     let data = res.json::<SearchRes>().await?;
 
     if data.animes.is_empty() {
-        return Err(anyhow!("no matching episode"));
+        return Err(anyhow!("no matching episode with info"));
     }
 
     if ep_type == "ova" && data.animes.len() < ep_num as usize {
-        return Err(anyhow!("no matching episode"));
+        return Err(anyhow!("no matching episode with info"));
     };
 
-    let (mut ani_id, mut ep_id) = (1u64, 1u64);
+    let (mut ani_id, mut ep_id) = (0u64, 0u64);
 
     if ep_type == "ova" {
         // ova只按照ep_num排序，结果无法预期
         (ani_id, ep_id) = (data.animes[ep_num as usize - 1].anime_id, ep_num);
+        return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     };
 
     if ep_type == "movie" {
         // 电影永远只取第一个结果
         (ani_id, ep_id) = (data.animes[0].anime_id, 1u64);
+        return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     };
 
     let ep_num_list = get_series_info(video_url, &sid).await?;
 
+    if ep_num_list.is_empty() {
+        return Err(anyhow!("no matching episode with info"));
+    }
+
     // 如果季数匹配，则直接返回结果
-    if data.animes.len() == ep_num_list.len() {
+    if data.animes.len() as u64 == ep_num_list.last().unwrap().0 {
         (ani_id, ep_id) = (data.animes[ep_snum as usize - 1].anime_id, ep_num);
+        return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     };
+
+    if get_dan_sum(&data.animes, ep_snum)? == get_em_sum(&ep_num_list, ep_snum)? {
+        (ani_id, ep_id) = (data.animes[ep_snum as usize - 1].anime_id, ep_num);
+        return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
+    }
+
+    if ep_num_list[0].0 != 1 && (ep_snum as u64) != ep_num_list.last().unwrap().0 {
+        return Err(anyhow!("need more info, skip"));
+    }
+
+    if ep_num_list[0].0 != 1 && (data.animes.len() as u64) < ep_num_list.last().unwrap().0 {
+        return Err(anyhow!("need more info, skip"));
+    }
+
+    if ep_num_list[0].0 != 1
+        && data.animes[ep_snum as usize].episode_count == ep_num_list.last().unwrap().1
+    {
+        (ani_id, ep_id) = (data.animes[ep_snum as usize].anime_id, ep_num);
+        return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
+    }
+
+    if ep_num_list[0].0 != 1
+        && data.animes[ep_snum as usize].episode_count
+            + data.animes[ep_snum as usize - 1].episode_count
+            == ep_num_list.last().unwrap().1
+    {
+        if ep_num <= data.animes[ep_snum as usize - 1].episode_count {
+            (ani_id, ep_id) = (data.animes[ep_snum as usize - 1].anime_id, ep_num);
+            return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
+        } else {
+            (ani_id, ep_id) = (
+                data.animes[ep_snum as usize].anime_id,
+                ep_num - data.animes[ep_snum as usize - 1].episode_count,
+            );
+            return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
+        }
+    }
+
+    if ep_num_list[0].0 != 1 {
+        return Err(anyhow!("need more info, skip"));
+    }
+
+    if get_dan_sum(&data.animes, data.animes.len() as i64)?
+        != get_em_sum(&ep_num_list, ep_num_list.len() as i64)?
+    {
+        return Err(anyhow!("need more info, skip"));
+    }
 
     // SHIT
     //
@@ -434,9 +491,6 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
                 }
             }
         }
-        if (ani_id, ep_id) == (0, 0) {
-            return Err(anyhow!("not matching episode"));
-        }
     }
 
     // shit
@@ -457,7 +511,7 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
                 {
                     (ani_id, ep_id) = (
                         data.animes[i].anime_id,
-                        ep_num + ep_num_list[ep_snum as usize - 2],
+                        ep_num + ep_num_list[ep_snum as usize - 2].1,
                     );
                     break 'outer;
                 }
@@ -470,16 +524,13 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
                 break 'outer;
             }
         }
-        if (ani_id, ep_id) == (0, 0) {
-            return Err(anyhow!("not matching episode"));
-        }
     }
 
-    if let Ok(p) = format!("{}{:04}", ani_id, ep_id).parse::<usize>() {
-        Ok(p)
-    } else {
-        Err(anyhow!("parse episode id error"))
+    if (ani_id, ep_id) == (0, 0) {
+        return Err(anyhow!("not matching episode with info"));
     }
+
+    Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?)
 }
 
 // 求dandan返回结果中的前n季集数之和
@@ -500,7 +551,7 @@ fn get_dan_sum(list: &[Anime], index: i64) -> Result<u64> {
 
 // 求emby前n季集数和
 //
-fn get_em_sum(list: &[u64], index: i64) -> Result<u64> {
+fn get_em_sum(list: &[(u64, u64)], index: i64) -> Result<u64> {
     if index > list.len() as i64 || index < 0 {
         return Err(anyhow!("beyond bound of list"));
     }
@@ -508,7 +559,7 @@ fn get_em_sum(list: &[u64], index: i64) -> Result<u64> {
     let mut sum = 0;
 
     for item in list.iter().take(index as usize) {
-        sum += item;
+        sum += item.1;
     }
 
     Ok(sum)
