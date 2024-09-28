@@ -7,9 +7,11 @@
 ## Install
 
 1. build by yourself
+
 ```bash
 cargo build --release
 ```
+
 2. download prebuilt package from [release](https://github.com/Kosette/danmaku/releases/latest)
 
 Copy the `.dll`/`.so` file to the `scripts` subdirectory of your mpv configuration directory.
@@ -33,6 +35,7 @@ Set the following options in `script-opts/danmaku.conf` to configure the plugin:
 - `no_overlap=yes`: hide the overlapping danmaku, `yes` or `no`.
 - `proxy=http://127.0.0.1:8080`: add proxy for requests, default blank
 - `user_agent=libmpv`: add user-agent for network requests, default `libmpv`
+- `log=false`: `true/on/enable` will enable logging to file, default `false`, log_file `~~/files/danmu.log`
 - `filter=keyword1,keyword2`: comma separated keywords, danmaku that contains any of them will be blocked.
 - `filter_source=bilibili,gamer`: comma separated case-insensitive sources (`bilibili`, `gamer`, `acfun`, `qq`, `iqiyi`, `d` or `dandan`), danmaku from any of them will be blocked, runtime updatable via `script-opts` option/property.
 - `filter_bilibili=~~/files/bilibili.json`: filter file exported from bilibili, regex/user based blocking is not supported, double-tilde placeholders are expanded.
