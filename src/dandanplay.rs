@@ -1,7 +1,7 @@
 use crate::{
     emby::{get_episode_info, get_series_info, EpInfo},
     mpv::osd_message,
-    options::{read_options, Filter},
+    options::{self, Filter},
 };
 use anyhow::{anyhow, Ok, Result};
 use hex::encode;
@@ -105,11 +105,7 @@ impl From<&str> for Source {
 pub(crate) static CLIENT: LazyLock<Client> = LazyLock::new(build);
 
 fn build() -> reqwest::Client {
-    let (options, _) = read_options()
-        .map_err(|e| crate::log::log_error(&e))
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let options = *options::OPTIONS;
 
     if options.proxy.is_empty() {
         Client::builder()
@@ -141,7 +137,7 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
         info!("Now streaming from: {}", path);
         info!("Episode info: {}", ep_info);
 
-        let file_name = format!("{}.mp4", ep_info.name);
+        let file_name = ep_info.get_name();
         if ep_info.status {
             let epid = get_episode_id_by_info(ep_info, path).await;
 
@@ -328,6 +324,8 @@ struct Anime {
     anime_id: u64,
     #[serde(rename = "episodeCount")]
     episode_count: u64,
+    #[serde(rename = "animeTitle")]
+    anime_title: String,
 }
 
 // total shit
@@ -337,12 +335,13 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
     use std::result::Result::Ok;
     use url::form_urlencoded;
 
+    let encoded_name: String =
+        form_urlencoded::byte_serialize(ep_info.get_series_name().as_bytes()).collect();
+
     let ep_type = ep_info.r#type;
     let ep_snum = ep_info.sn_index;
     let ep_num = ep_info.ep_index;
     let sid = ep_info.ss_id;
-
-    let encoded_name: String = form_urlencoded::byte_serialize(ep_info.name.as_bytes()).collect();
 
     let url = format!(
         "https://api.dandanplay.net/api/v2/search/anime?keyword={}&type={}",
@@ -370,6 +369,16 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
         error!("No matching result");
 
         return Err(anyhow!("no matching episode with info"));
+    }
+
+    if ["true", "on", "enable"].contains(&options::OPTIONS.log) {
+        let dandan_search = data
+            .animes
+            .iter()
+            .map(|f| (&f.anime_title, f.episode_count))
+            .collect::<Vec<(_, _)>>();
+
+        info!("Search results from Dandanplay: {:?}", dandan_search);
     }
 
     if ep_type == "ova" && data.animes.len() < ep_num as usize {

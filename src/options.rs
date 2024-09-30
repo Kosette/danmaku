@@ -5,7 +5,7 @@ use std::{
     collections::HashSet,
     fs::File,
     io::{BufRead, BufReader, ErrorKind},
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 use tokio::sync::Mutex;
 
@@ -131,3 +131,12 @@ pub fn read_options() -> Result<Option<(Options, Arc<Filter>)>> {
     }
     Ok(Some((opts, Arc::new(filter))))
 }
+
+pub static OPTIONS: LazyLock<Options> = LazyLock::new(|| {
+    read_options()
+        .map_err(|e| crate::log::log_error(&e))
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+        .0
+});

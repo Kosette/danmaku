@@ -1,9 +1,8 @@
-use std::fmt::Display;
-
 use super::dandanplay::CLIENT;
 use anyhow::{anyhow, Context, Ok, Result};
 use regex::Regex;
 use serde::Deserialize;
+use std::fmt::Display;
 use tracing::{error, info};
 use url::Url;
 
@@ -59,8 +58,9 @@ pub(crate) fn extract_params(video_url: &str) -> Result<P3> {
 pub(crate) struct EpInfo {
     pub r#type: String,
     pub name: String,
-    pub sn_index: i64,
+    pub s_name: String,
     pub ep_index: u64,
+    pub sn_index: i64,
     pub ss_id: String,
     pub status: bool,
 }
@@ -70,8 +70,9 @@ impl Default for EpInfo {
         Self {
             r#type: "unknown".to_string(),
             name: "unknown".to_string(),
-            sn_index: -1,
+            s_name: "unknown".to_string(),
             ep_index: 0,
+            sn_index: -1,
             ss_id: "0".to_string(),
             status: false,
         }
@@ -81,11 +82,29 @@ impl Default for EpInfo {
 impl Display for EpInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = format!(
-            "[Type: {}  Name: {}  Season Number: {}  Episode Number: {}  SeriesId: {}  Status: {}]",
-            self.r#type, self.name, self.sn_index, self.ep_index, self.ss_id, self.status
+            "[Type: {}  Name: {}  Series Name: {}  Season Number: {}  Episode Number: {}  SeriesId: {}  Status: {}]",
+            self.r#type, self.name,self.s_name, self.sn_index, self.ep_index, self.ss_id, self.status
         );
 
         write!(f, "{}", str)
+    }
+}
+
+impl EpInfo {
+    pub fn get_name(&self) -> String {
+        if self.r#type == "tvseries" || self.r#type == "ova" {
+            format!("{} {}", self.s_name, self.name)
+        } else {
+            self.name.to_string()
+        }
+    }
+
+    pub fn get_series_name(&self) -> String {
+        if self.r#type == "tvseries" || self.r#type == "ova" {
+            self.s_name.to_string()
+        } else {
+            self.name.to_string()
+        }
     }
 }
 
@@ -99,6 +118,8 @@ struct EpData {
 struct EpDatum {
     #[serde(rename = "Type")]
     r#type: String,
+    #[serde(default, rename = "Name")]
+    name: String,
     #[serde(default, rename = "SeriesName")]
     s_name: String,
     #[serde(default, rename = "ParentIndexNumber")]
@@ -107,19 +128,17 @@ struct EpDatum {
     e_index: u64,
     #[serde(default, rename = "SeriesId")]
     s_id: String,
-    #[serde(default, rename = "Name")]
-    name: String,
 }
 
 impl Default for EpDatum {
     fn default() -> Self {
         Self {
             r#type: "unknown".to_string(),
+            name: "unknown".to_string(),
             s_name: "unknown".to_string(),
             s_index: -1,
             e_index: 0,
             s_id: "0".to_string(),
-            name: "unknown".to_string(),
         }
     }
 }
@@ -165,15 +184,18 @@ pub(crate) async fn get_episode_info(video_url: &str) -> Result<EpInfo> {
         if epdata.items[0].s_index == 0 {
             Ok(EpInfo {
                 r#type: "ova".to_string(),
-                name: epdata.items[0].s_name.clone(),
+                name: epdata.items[0].name.clone(),
+                s_name: epdata.items[0].s_name.clone(),
+                sn_index: epdata.items[0].s_index,
                 ep_index: epdata.items[0].e_index,
+                ss_id: epdata.items[0].s_id.clone(),
                 status: true,
-                ..Default::default()
             })
         } else {
             Ok(EpInfo {
                 r#type: "tvseries".to_string(),
-                name: epdata.items[0].s_name.clone(),
+                name: epdata.items[0].name.clone(),
+                s_name: epdata.items[0].s_name.clone(),
                 sn_index: epdata.items[0].s_index,
                 ep_index: epdata.items[0].e_index,
                 ss_id: epdata.items[0].s_id.clone(),
@@ -297,7 +319,7 @@ pub(crate) async fn get_series_info(video_url: &str, series_id: &str) -> Result<
             episodes_list.push((season.season_num, sum));
         }
     }
-    info!("Episodes list: {:?}", episodes_list);
+    info!("Episodes list from Emby: {:?}", episodes_list);
 
     Ok(episodes_list)
 }

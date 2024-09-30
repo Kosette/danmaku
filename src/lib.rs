@@ -13,7 +13,7 @@ use crate::{
     },
     log::{log_code, log_error},
     mpv::{get_property_f64, get_property_string, osd_message, osd_overlay, remove_overlay},
-    options::{read_options, Filter, Options},
+    options::{Filter, Options},
 };
 use anyhow::anyhow;
 use mpv::expand_path;
@@ -85,11 +85,14 @@ async fn main() -> c_int {
         }
     }
 
-    let (options, filter) = read_options()
+    let options = *options::OPTIONS;
+
+    let filter = options::read_options()
         .map_err(|e| log_error(&e))
         .ok()
         .flatten()
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .1;
 
     // Initialize tracing subscriber
     if ["true", "on", "enable"].contains(&options.log) {
