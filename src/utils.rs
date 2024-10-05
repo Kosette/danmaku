@@ -4,7 +4,12 @@ use hex::encode;
 use md5::{Digest, Md5};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::LazyLock};
+use std::{
+    borrow::Borrow,
+    collections::{HashMap, VecDeque},
+    hash::Hash,
+    sync::LazyLock,
+};
 use tracing::{error, info};
 
 pub(crate) static CLIENT: LazyLock<Client> = LazyLock::new(build);
@@ -172,7 +177,8 @@ pub struct TimesId {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Linkage {
-    pub items: HashMap<String, HashMap<String, TimesId>>,
+    pub items: HashMap<String, LimitedHashMap<String, TimesId>>,
+    pub seasons: HashMap<String, LimitedHashMap<String, usize>>,
 }
 
 impl Default for Linkage {
@@ -185,10 +191,11 @@ impl Linkage {
     pub fn new() -> Self {
         Linkage {
             items: HashMap::new(),
+            seasons: HashMap::new(),
         }
     }
 
-    pub fn insert(&mut self, host_key: &str, item_id: &str, epid: usize) {
+    pub fn insert_items(&mut self, host_key: &str, item_id: &str, epid: usize) {
         let timestamped_value = TimesId {
             epid,
             last_updated: SystemTime::now(),
@@ -199,14 +206,25 @@ impl Linkage {
             .insert(item_id.to_string(), timestamped_value);
     }
 
-    pub fn get(&self, host_key: &str, item_id: &str) -> Option<usize> {
+    pub fn get_items(&self, host_key: &str, item_id: &str) -> Option<usize> {
         self.items.get(host_key)?.get(item_id).map(|tv| tv.epid)
+    }
+
+    pub fn insert_seasons(&mut self, host_key: &str, season_id: &str, anime_id: usize) {
+        self.seasons
+            .entry(host_key.to_string())
+            .or_default()
+            .insert(season_id.to_string(), anime_id);
+    }
+
+    pub fn get_seasons(&self, host_key: &str, season_id: &str) -> Option<usize> {
+        self.seasons.get(host_key)?.get(season_id).copied()
     }
 
     pub fn clean_expired_entries(&mut self, expiration_duration: Duration) {
         let now = SystemTime::now();
         self.items.retain(|_, inner_map| {
-            inner_map.retain(|_, timestamped_value| {
+            inner_map.map.retain(|_, timestamped_value| {
                 now.duration_since(timestamped_value.last_updated)
                     .map(|age| age < expiration_duration)
                     .unwrap_or(true)
@@ -221,9 +239,7 @@ impl Linkage {
         use tokio::io::AsyncWriteExt;
 
         let encoded: Vec<u8> = bincode::serialize(self)?;
-
         let path_str = expand_path("~~/files/danmaku/database")?;
-
         let path = Path::new(&path_str);
 
         if !path.parent().expect("no parent dir").exists() {
@@ -258,5 +274,63 @@ impl Linkage {
 
         let linkage: Linkage = bincode::deserialize(&contents)?;
         Ok(linkage)
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct LimitedHashMap<K, V>
+where
+    K: Clone + std::hash::Hash + Eq,
+{
+    map: HashMap<K, V>,
+    keys: VecDeque<K>,
+    capacity: usize,
+}
+
+impl<K: std::hash::Hash + Eq + Clone, V> Default for LimitedHashMap<K, V> {
+    fn default() -> Self {
+        Self::new(30)
+    }
+}
+
+impl<K: std::hash::Hash + Eq + Clone, V> LimitedHashMap<K, V> {
+    fn new(capacity: usize) -> Self {
+        LimitedHashMap {
+            map: HashMap::new(),
+            keys: VecDeque::new(),
+            capacity,
+        }
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        if self.map.contains_key(&key) {
+            self.map.insert(key.clone(), value);
+        } else {
+            if self.keys.len() == self.capacity {
+                if let Some(oldest_key) = self.keys.pop_front() {
+                    self.map.remove(&oldest_key);
+                }
+            }
+
+            self.keys.push_back(key.clone());
+            self.map.insert(key, value);
+        }
+    }
+
+    fn get<Q>(&self, key: &Q) -> Option<&V>
+    where
+        Q: ?Sized,
+        K: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.map.get(key)
+    }
+
+    fn _len(&self) -> usize {
+        self.map.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.map.is_empty()
     }
 }

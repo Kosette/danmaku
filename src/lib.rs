@@ -96,7 +96,7 @@ async fn main() -> c_int {
         .1;
 
     // Initialize tracing subscriber
-    if ["true", "on", "enable"].contains(&options.log) {
+    if ["true", "on", "enable"].contains(&options.log.to_ascii_lowercase().as_str()) {
         let log_dir = expand_path("~~/files").expect("can not expand log_dir");
 
         if !std::path::Path::new(&log_dir).exists() {

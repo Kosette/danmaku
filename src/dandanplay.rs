@@ -1,4 +1,5 @@
-use crate::utils::CLIENT;
+use crate::emby::get_episode_num_emby;
+use crate::utils::{Linkage, CLIENT};
 use crate::{
     emby::{get_episode_info, get_series_info, EpInfo},
     mpv::osd_message,
@@ -180,40 +181,72 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
             let mut episode_id = 0usize;
 
             if linkage.items.is_empty() {
-                let epid = get_episode_id_by_info(&ep_info, path).await;
+                let epid = get_episode_id_by_info(&ep_info, &mut linkage).await;
 
                 match epid {
                     Ok(p) => episode_id = p,
                     Err(_) => {
                         osd_message("trying matching with video hash");
                         episode_id =
-                            get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name)
-                                .await?
+                            match get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name)
+                                .await
+                            {
+                                Ok(id) => {
+                                    if get_episode_num_dan(id).await?
+                                        == get_episode_num_emby(&ep_info).await?
+                                    {
+                                        linkage.insert_seasons(
+                                            &ep_info.host,
+                                            &ep_info.item_info.se_id,
+                                            id / 10000,
+                                        );
+                                    }
+                                    id
+                                }
+                                Err(e) => return Err(e),
+                            }
                     }
                 }
-                linkage.insert(&ep_info.host, &ep_info.item_id, episode_id);
+                linkage.insert_items(&ep_info.host, &ep_info.item_info.item_id, episode_id);
                 linkage.save_as_bincode().await?;
-            }
+            } else {
+                let epid = linkage.get_items(&ep_info.host, &ep_info.item_info.item_id);
 
-            let epid = linkage.get(&ep_info.host, &ep_info.item_id);
+                if epid.is_none() {
+                    let epid = get_episode_id_by_info(&ep_info, &mut linkage).await;
 
-            if epid.is_none() {
-                let epid = get_episode_id_by_info(&ep_info, path).await;
-
-                match epid {
-                    Ok(p) => episode_id = p,
-                    Err(_) => {
-                        osd_message("trying matching with video hash");
-                        episode_id =
-                            get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name)
-                                .await?
+                    match epid {
+                        Ok(p) => episode_id = p,
+                        Err(_) => {
+                            osd_message("trying matching with video hash");
+                            episode_id = match get_episode_id_by_hash(
+                                &get_stream_hash(path).await?,
+                                &file_name,
+                            )
+                            .await
+                            {
+                                Ok(id) => {
+                                    if get_episode_num_dan(id).await?
+                                        == get_episode_num_emby(&ep_info).await?
+                                    {
+                                        linkage.insert_seasons(
+                                            &ep_info.host,
+                                            &ep_info.item_info.se_id,
+                                            id / 10000,
+                                        );
+                                    }
+                                    id
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        }
                     }
-                }
 
-                linkage.insert(&ep_info.host, &ep_info.item_id, episode_id);
-                linkage.save_as_bincode().await?;
-            } else if let Some(id) = epid {
-                episode_id = id
+                    linkage.insert_items(&ep_info.host, &ep_info.item_info.item_id, episode_id);
+                    linkage.save_as_bincode().await?;
+                } else if let Some(id) = epid {
+                    episode_id = id
+                }
             }
 
             if episode_id == 0usize {
@@ -223,7 +256,6 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
             episode_id
         } else {
             osd_message("trying matching with video hash");
-
             get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name).await?
         }
     };
@@ -319,19 +351,24 @@ async fn get_episode_id_by_hash(hash: &str, file_name: &str) -> Result<usize> {
 // total shit
 // shitshitshitshitshitshitshitshitshitshitshit
 //
-async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usize> {
+async fn get_episode_id_by_info(ep_info: &EpInfo, linkage: &mut Linkage) -> Result<usize> {
     use crate::utils::{get_dan_sum, get_em_sum, SearchRes};
     use std::result::Result::Ok;
     use url::form_urlencoded;
 
+    let ep_type = &ep_info.r#type;
+    let host = &ep_info.host;
+    let ep_snum = ep_info.item_info.sn_index;
+    let ep_num = ep_info.item_info.ep_index;
+    let seid = &ep_info.item_info.se_id;
+
+    let anime_id = linkage.get_seasons(host, seid);
+    if let Some(id) = anime_id {
+        return Ok(format!("{}{:04}", id, ep_num).parse::<usize>()?);
+    }
+
     let encoded_name: String =
         form_urlencoded::byte_serialize(ep_info.get_series_name().as_bytes()).collect();
-
-    let ep_type = &ep_info.r#type;
-    let ep_snum = ep_info.sn_index;
-    let ep_num = ep_info.ep_index;
-    let sid = &ep_info.ss_id;
-
     let url = format!(
         "https://api.dandanplay.net/api/v2/search/anime?keyword={}&type={}",
         encoded_name, ep_type
@@ -360,7 +397,7 @@ async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usi
         return Err(anyhow!("no matching episode with info"));
     }
 
-    if ["true", "on", "enable"].contains(&options::OPTIONS.log) {
+    if ["true", "on", "enable"].contains(&options::OPTIONS.log.to_ascii_lowercase().as_str()) {
         let dandan_search = data
             .animes
             .iter()
@@ -396,7 +433,7 @@ async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usi
         return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     };
 
-    let ep_num_list = get_series_info(video_url, sid).await?;
+    let ep_num_list = get_series_info(ep_info).await?;
 
     if ep_num_list.is_empty() {
         error!("Ooops, series info fetching from Emby is empty");
@@ -410,6 +447,8 @@ async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usi
 
         info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
 
+        linkage.insert_seasons(host, seid, ani_id as usize);
+
         return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     };
 
@@ -417,6 +456,8 @@ async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usi
         (ani_id, ep_id) = (data.animes[ep_snum as usize - 1].anime_id, ep_num);
 
         info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
+
+        linkage.insert_seasons(host, seid, ani_id as usize);
 
         return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     }
@@ -439,6 +480,8 @@ async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usi
         (ani_id, ep_id) = (data.animes[ep_snum as usize].anime_id, ep_num);
         info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
 
+        linkage.insert_seasons(host, seid, ani_id as usize);
+
         return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     }
 
@@ -450,6 +493,8 @@ async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usi
         if ep_num <= data.animes[ep_snum as usize - 1].episode_count {
             (ani_id, ep_id) = (data.animes[ep_snum as usize - 1].anime_id, ep_num);
             info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
+
+            linkage.insert_seasons(host, seid, ani_id as usize);
 
             return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
         } else {
@@ -493,7 +538,7 @@ async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usi
                         if i == x {
                             (ani_id, ep_id) =
                                 (data.animes[ep_snum as usize - 1 + i].anime_id, ep_num);
-
+                            linkage.insert_seasons(host, seid, ani_id as usize);
                             break 'outer;
                         }
 
@@ -563,6 +608,7 @@ async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usi
                     == get_em_sum(&ep_num_list, ep_snum - 1)?
                 {
                     (ani_id, ep_id) = (data.animes[i].anime_id, ep_num);
+                    linkage.insert_seasons(host, seid, ani_id as usize);
                     break 'outer;
                 }
 
@@ -573,6 +619,7 @@ async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usi
                         data.animes[i].anime_id,
                         ep_num + ep_num_list[ep_snum as usize - 2].1,
                     );
+                    linkage.insert_seasons(host, seid, ani_id as usize);
                     break 'outer;
                 }
             }
@@ -581,6 +628,7 @@ async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usi
                 && get_em_sum(&ep_num_list, ep_snum + 1)? == get_dan_sum(&data.animes, i as i64)?
             {
                 (ani_id, ep_id) = (data.animes[i].anime_id, ep_num);
+                linkage.insert_seasons(host, seid, ani_id as usize);
                 break 'outer;
             }
         }
@@ -593,4 +641,48 @@ async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usi
     info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
 
     Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?)
+}
+
+#[derive(Debug, Deserialize)]
+struct Bangumi {
+    bangumi: BEpisodes,
+}
+
+#[derive(Debug, Deserialize)]
+struct BEpisodes {
+    episodes: Vec<BEpisode>,
+}
+
+#[derive(Deserialize, Debug)]
+struct BEpisode {
+    #[serde(rename = "episodeNumber")]
+    episode_number: String,
+}
+
+pub async fn get_episode_num_dan(epid: usize) -> Result<u64> {
+    let anime_id = epid / 10000;
+    let bangumi_url = format!("https://api.dandanplay.net/api/v2/bangumi/{}", anime_id);
+    let res = CLIENT.get(bangumi_url).send().await?;
+
+    if !res.status().is_success() {
+        error!(
+            "Failed to fetch seasons info from Emby server, Status: {:?}",
+            res.status()
+        );
+
+        return Err(anyhow!(
+            "fetch seasons info error, status: {}",
+            res.status()
+        ));
+    }
+
+    let episodes = res.json::<Bangumi>().await?;
+    let mut sum = 0;
+
+    let _ = episodes.bangumi.episodes.iter().map(|ep| {
+        if ep.episode_number.parse::<u64>().is_ok() {
+            sum += 1;
+        }
+    });
+    Ok(sum)
 }
