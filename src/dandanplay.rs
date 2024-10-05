@@ -1,19 +1,13 @@
+use crate::utils::CLIENT;
 use crate::{
     emby::{get_episode_info, get_series_info, EpInfo},
     mpv::osd_message,
     options::{self, Filter},
 };
 use anyhow::{anyhow, Ok, Result};
-use hex::encode;
-use md5::{Digest, Md5};
-use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::{
-    hint,
-    io::Read,
-    sync::{Arc, LazyLock},
-};
+use std::{hint, sync::Arc};
 use tracing::{error, info};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -64,15 +58,71 @@ struct Match {
     episode_id: usize,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+struct Comment {
+    p: String,
+    m: String,
+}
+
+#[derive(Deserialize, Serialize)]
 struct CommentResponse {
     comments: Vec<Comment>,
 }
 
-#[derive(Deserialize)]
-struct Comment {
-    p: String,
-    m: String,
+impl CommentResponse {
+    async fn get(episode_id: usize) -> Result<Self> {
+        Ok(CLIENT
+            .get(format!(
+                "https://api.dandanplay.net/api/v2/comment/{}?withRelated=true",
+                episode_id
+            ))
+            .send()
+            .await?
+            .json::<CommentResponse>()
+            .await?)
+    }
+
+    async fn save(&self, episode_id: usize) -> Result<()> {
+        use crate::mpv::expand_path;
+        use std::path::Path;
+        use tokio::io::AsyncWriteExt;
+
+        let encoded: Vec<u8> = bincode::serialize(self)?;
+        let path_str = expand_path(&format!("~~/files/danmaku/{}", episode_id))?;
+        let path = Path::new(&path_str);
+
+        if !path.parent().expect("no parent dir").exists() {
+            std::fs::create_dir_all(path.parent().expect("no parent dir"))?;
+        }
+
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .open(path)
+            .await?;
+
+        file.write_all(&encoded).await?;
+
+        Ok(())
+    }
+
+    async fn load(episode_id: usize) -> Result<Self> {
+        use super::mpv::expand_path;
+        use std::path::Path;
+        use tokio::fs::File;
+        use tokio::io::AsyncReadExt;
+
+        let path_str = expand_path(&format!("~~/files/danmaku/{}", episode_id))?;
+        let path = Path::new(&path_str);
+
+        let mut file = File::open(path).await?;
+        let mut contents = vec![];
+        file.read_to_end(&mut contents).await?;
+
+        let comments: CommentResponse = bincode::deserialize(&contents)?;
+        Ok(comments)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -102,26 +152,9 @@ impl From<&str> for Source {
     }
 }
 
-pub(crate) static CLIENT: LazyLock<Client> = LazyLock::new(build);
-
-fn build() -> reqwest::Client {
-    let options = *options::OPTIONS;
-
-    if options.proxy.is_empty() {
-        Client::builder()
-            .user_agent(options.user_agent)
-            .build()
-            .expect("Failed to build client")
-    } else {
-        Client::builder()
-            .proxy(reqwest::Proxy::all(options.proxy).unwrap())
-            .user_agent(options.user_agent)
-            .build()
-            .expect("Failed to build client")
-    }
-}
-
 pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>> {
+    use crate::utils::Linkage;
+    use crate::utils::{get_localfile_hash, get_localfile_name, get_stream_hash, is_http_link};
     use std::result::Result::Ok;
 
     let episode_id = if !is_http_link(path) {
@@ -139,31 +172,70 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
 
         let file_name = ep_info.get_name();
         if ep_info.status {
-            let epid = get_episode_id_by_info(ep_info, path).await;
+            let mut linkage = match Linkage::load_from_bincode().await {
+                Ok(s) => s,
+                Err(_) => Linkage::new(),
+            };
 
-            match epid {
-                Ok(p) => p,
-                Err(_) => {
-                    osd_message("trying matching with video hash");
-                    get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name).await?
+            let mut episode_id = 0usize;
+
+            if linkage.items.is_empty() {
+                let epid = get_episode_id_by_info(&ep_info, path).await;
+
+                match epid {
+                    Ok(p) => episode_id = p,
+                    Err(_) => {
+                        osd_message("trying matching with video hash");
+                        episode_id =
+                            get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name)
+                                .await?
+                    }
                 }
+                linkage.insert(&ep_info.host, &ep_info.item_id, episode_id);
+                linkage.save_as_bincode().await?;
             }
+
+            let epid = linkage.get(&ep_info.host, &ep_info.item_id);
+
+            if epid.is_none() {
+                let epid = get_episode_id_by_info(&ep_info, path).await;
+
+                match epid {
+                    Ok(p) => episode_id = p,
+                    Err(_) => {
+                        osd_message("trying matching with video hash");
+                        episode_id =
+                            get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name)
+                                .await?
+                    }
+                }
+
+                linkage.insert(&ep_info.host, &ep_info.item_id, episode_id);
+                linkage.save_as_bincode().await?;
+            } else if let Some(id) = epid {
+                episode_id = id
+            }
+
+            if episode_id == 0usize {
+                error!("no matching result");
+                return Err(anyhow!("no matching result"));
+            }
+            episode_id
         } else {
-            osd_message("matching with video hash");
+            osd_message("trying matching with video hash");
+
             get_episode_id_by_hash(&get_stream_hash(path).await?, &file_name).await?
         }
     };
 
-    let danmaku = CLIENT
-        .get(format!(
-            "https://api.dandanplay.net/api/v2/comment/{}?withRelated=true",
-            episode_id
-        ))
-        .send()
-        .await?
-        .json::<CommentResponse>()
-        .await?
-        .comments;
+    let danmaku = match CommentResponse::load(episode_id).await {
+        Ok(res) => res.comments,
+        Err(_) => {
+            let comres = CommentResponse::get(episode_id).await?;
+            comres.save(episode_id).await?;
+            comres.comments
+        }
+    };
 
     let sources_rt = filter.sources_rt.lock().await;
     let mut danmaku = danmaku
@@ -202,75 +274,6 @@ pub async fn get_danmaku(path: &str, filter: Arc<Filter>) -> Result<Vec<Danmaku>
     danmaku.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
 
     Ok(danmaku)
-}
-
-use url::Url;
-
-fn is_http_link(url: &str) -> bool {
-    use std::result::Result::Ok;
-
-    match Url::parse(url) {
-        Ok(parsed_url) => parsed_url.scheme() == "http" || parsed_url.scheme() == "https",
-        Err(_) => false,
-    }
-}
-
-// Set Limit of buffer size
-const MAX_SIZE: usize = 16 * 1024 * 1024;
-
-async fn get_stream_hash(path: &str) -> Result<String> {
-    use futures::StreamExt;
-
-    let response = CLIENT.get(path).send().await?;
-
-    // check status Code
-    if !response.status().is_success() {
-        error!(
-            "Failed to fetch data from server, Status: {}",
-            response.status()
-        );
-
-        return Err(anyhow!("Failed to fetch data from server"));
-    }
-
-    let mut stream = response.bytes_stream();
-
-    let mut downloaded: usize = 0;
-
-    let mut hasher = Md5::new();
-
-    // Read first 16MiB chunk
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-
-        if downloaded + chunk.len() > MAX_SIZE {
-            let remaining = MAX_SIZE - downloaded;
-            hasher.update(&chunk[..remaining]);
-
-            downloaded += chunk.len();
-
-            break;
-        } else {
-            hasher.update(&chunk);
-
-            downloaded += chunk.len();
-        }
-
-        if downloaded >= MAX_SIZE {
-            break;
-        }
-    }
-
-    let result = hasher.finalize();
-
-    if downloaded < MAX_SIZE {
-        error!("File too small, less than 16MiB");
-        return Err(anyhow!("file too small"));
-    }
-
-    info!("Get streaming file hash: {}", encode(result));
-
-    Ok(encode(result))
 }
 
 async fn get_episode_id_by_hash(hash: &str, file_name: &str) -> Result<usize> {
@@ -313,35 +316,21 @@ async fn get_episode_id_by_hash(hash: &str, file_name: &str) -> Result<usize> {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct SearchRes {
-    animes: Vec<Anime>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Anime {
-    #[serde(rename = "animeId")]
-    anime_id: u64,
-    #[serde(rename = "episodeCount")]
-    episode_count: u64,
-    #[serde(rename = "animeTitle")]
-    anime_title: String,
-}
-
 // total shit
 // shitshitshitshitshitshitshitshitshitshitshit
 //
-async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usize> {
+async fn get_episode_id_by_info(ep_info: &EpInfo, video_url: &str) -> Result<usize> {
+    use crate::utils::{get_dan_sum, get_em_sum, SearchRes};
     use std::result::Result::Ok;
     use url::form_urlencoded;
 
     let encoded_name: String =
         form_urlencoded::byte_serialize(ep_info.get_series_name().as_bytes()).collect();
 
-    let ep_type = ep_info.r#type;
+    let ep_type = &ep_info.r#type;
     let ep_snum = ep_info.sn_index;
     let ep_num = ep_info.ep_index;
-    let sid = ep_info.ss_id;
+    let sid = &ep_info.ss_id;
 
     let url = format!(
         "https://api.dandanplay.net/api/v2/search/anime?keyword={}&type={}",
@@ -407,7 +396,7 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
         return Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?);
     };
 
-    let ep_num_list = get_series_info(video_url, &sid).await?;
+    let ep_num_list = get_series_info(video_url, sid).await?;
 
     if ep_num_list.is_empty() {
         error!("Ooops, series info fetching from Emby is empty");
@@ -604,64 +593,4 @@ async fn get_episode_id_by_info(ep_info: EpInfo, video_url: &str) -> Result<usiz
     info!("Success, tv series episode id: {}{:04}", ani_id, ep_id);
 
     Ok(format!("{}{:04}", ani_id, ep_id).parse::<usize>()?)
-}
-
-// 求dandan返回结果中的前n季集数之和
-//
-fn get_dan_sum(list: &[Anime], index: i64) -> Result<u64> {
-    if index > list.len() as i64 || index < 0 {
-        return Err(anyhow!("beyond bound of list"));
-    }
-
-    let mut sum = 0;
-
-    for item in list.iter().take(index as usize) {
-        sum += item.episode_count;
-    }
-
-    Ok(sum)
-}
-
-// 求emby前n季集数和
-//
-fn get_em_sum(list: &[(u64, u64)], index: i64) -> Result<u64> {
-    if index > list.len() as i64 || index < 0 {
-        return Err(anyhow!("beyond bound of list"));
-    }
-
-    let mut sum = 0;
-
-    for item in list.iter().take(index as usize) {
-        sum += item.1;
-    }
-
-    Ok(sum)
-}
-
-fn get_localfile_name(path: &str) -> String {
-    std::path::Path::new(path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("unknown.mp4")
-        .to_string()
-}
-
-fn get_localfile_hash(path: &str) -> Result<String> {
-    use std::fs::File;
-    use std::path::PathBuf;
-
-    let mut file = File::open(PathBuf::from(path))?;
-
-    let mut buffer = vec![0u8; MAX_SIZE];
-    let bytes_read = file.read(&mut buffer)?;
-
-    if bytes_read < MAX_SIZE {
-        error!("File too small, less than 16MiB");
-        return Err(anyhow!("file too small"));
-    }
-
-    let mut hasher = Md5::new();
-    hasher.update(&buffer[..bytes_read]);
-
-    Ok(encode(hasher.finalize()))
 }

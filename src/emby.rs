@@ -1,4 +1,4 @@
-use super::dandanplay::CLIENT;
+use super::utils::CLIENT;
 use anyhow::{anyhow, Context, Ok, Result};
 use regex::Regex;
 use serde::Deserialize;
@@ -57,11 +57,13 @@ pub(crate) fn extract_params(video_url: &str) -> Result<P3> {
 #[derive(Debug)]
 pub(crate) struct EpInfo {
     pub r#type: String,
+    pub host: String,
     pub name: String,
     pub s_name: String,
     pub ep_index: u64,
     pub sn_index: i64,
     pub ss_id: String,
+    pub item_id: String,
     pub status: bool,
 }
 
@@ -74,7 +76,9 @@ impl Default for EpInfo {
             ep_index: 0,
             sn_index: -1,
             ss_id: "0".to_string(),
+            item_id: "0".to_string(),
             status: false,
+            host: "unknown".to_string(),
         }
     }
 }
@@ -190,6 +194,8 @@ pub(crate) async fn get_episode_info(video_url: &str) -> Result<EpInfo> {
                 ep_index: epdata.items[0].e_index,
                 ss_id: epdata.items[0].s_id.clone(),
                 status: true,
+                host,
+                item_id,
             })
         } else {
             Ok(EpInfo {
@@ -200,6 +206,8 @@ pub(crate) async fn get_episode_info(video_url: &str) -> Result<EpInfo> {
                 ep_index: epdata.items[0].e_index,
                 ss_id: epdata.items[0].s_id.clone(),
                 status: true,
+                host,
+                item_id,
             })
         }
     } else if epdata.items[0].r#type == "Movie" {
@@ -207,6 +215,8 @@ pub(crate) async fn get_episode_info(video_url: &str) -> Result<EpInfo> {
             r#type: "movie".to_string(),
             name: epdata.items[0].name.clone(),
             status: true,
+            host,
+            item_id,
             ..Default::default()
         })
     } else {

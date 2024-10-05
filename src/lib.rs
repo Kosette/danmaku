@@ -4,6 +4,7 @@ pub mod ffi;
 pub mod log;
 pub mod mpv;
 pub mod options;
+pub mod utils;
 
 use crate::{
     dandanplay::{get_danmaku, Danmaku, Source, Status, StatusInner},
