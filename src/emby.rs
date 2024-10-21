@@ -368,7 +368,7 @@ pub(crate) async fn get_series_info(ep_info: &EpInfo) -> Result<Vec<(u64, u64)>>
     Ok(episodes_list)
 }
 
-pub(crate) async fn get_episode_num_emby(ep_info: &EpInfo) -> Result<u64> {
+pub(crate) async fn _get_episode_num_emby(ep_info: &EpInfo) -> Result<u64> {
     let series_id = ep_info.item_info.ss_id.clone();
     let season_id = ep_info.item_info.se_id.clone();
     let host = ep_info.host.clone();

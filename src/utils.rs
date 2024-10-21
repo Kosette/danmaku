@@ -175,10 +175,16 @@ pub struct TimesId {
     last_updated: SystemTime,
 }
 
+#[derive(Deserialize, Debug, Serialize, Clone, Copy)]
+pub struct AnimeOffset {
+    pub anime_id: usize,
+    pub offset: i64,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Linkage {
     pub items: HashMap<String, LimitedHashMap<String, TimesId>>,
-    pub seasons: HashMap<String, LimitedHashMap<String, usize>>,
+    pub seasons: HashMap<String, LimitedHashMap<String, AnimeOffset>>,
 }
 
 impl Default for Linkage {
@@ -210,14 +216,14 @@ impl Linkage {
         self.items.get(host_key)?.get(item_id).map(|tv| tv.epid)
     }
 
-    pub fn insert_seasons(&mut self, host_key: &str, season_id: &str, anime_id: usize) {
+    pub fn insert_seasons(&mut self, host_key: &str, season_id: &str, anime_id: AnimeOffset) {
         self.seasons
             .entry(host_key.to_string())
             .or_default()
             .insert(season_id.to_string(), anime_id);
     }
 
-    pub fn get_seasons(&self, host_key: &str, season_id: &str) -> Option<usize> {
+    pub fn get_seasons(&self, host_key: &str, season_id: &str) -> Option<AnimeOffset> {
         self.seasons.get(host_key)?.get(season_id).copied()
     }
 
