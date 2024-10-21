@@ -24,6 +24,8 @@ cargo build --release
 CTRL+d script-message toggle-danmaku // CTRL+d 打开弹幕，按键绑定可自由更换
 ```
 
+如果你使用uosc UI框架，可以在uosc.conf中的`controls`字段添加`<video>command:clear_all:script-message toggle-danmaku?弹幕开关`，给Danmaku添加一个按钮。
+
 开启后需要一些时间加载弹幕。
 
 在 `script-opts/danmaku.conf` 中设置以下选项以配置插件：

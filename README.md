@@ -5,6 +5,7 @@
 [mpv](https://mpv.io) danmaku plugin powered by [dandanplay API](https://api.dandanplay.net/swagger/ui/index). The plugin sends the name and hash value of the currently playing file to the dandanplay server to get matching danmaku comments.
 
 ## Preview
+
 ![image](https://github.com/user-attachments/assets/45ba9fd3-0339-4810-8325-5fcf6800ca24)
 
 ## Install
@@ -26,6 +27,8 @@ Example to bind the `d` key to toggle the danmaku visibility in your `input.conf
 ```
 d script-message toggle-danmaku
 ```
+
+If you use uosc, you can add an icon by adding `<video>command:clear_all:script-message toggle-danmaku?Danmaku Switch` to uosc.conf `controls`.
 
 It may take some time to load the danmaku after first enabling it.
 
