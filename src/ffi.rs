@@ -164,6 +164,7 @@ extern "C" {
         name: *const c_char,
         format: mpv_format,
     ) -> c_int;
+    pub fn mpv_command_string(ctx: *mut mpv_handle, args: *const c_char) -> c_int;
     pub fn mpv_event_name(event: mpv_event_id) -> *const c_char;
     pub fn mpv_wait_event(ctx: *mut mpv_handle, timeout: f64) -> *mut mpv_event;
     pub fn mpv_wakeup(ctx: *mut mpv_handle);
@@ -215,6 +216,11 @@ static mut pfn_mpv_observe_property: Option<
         name: *const c_char,
         format: mpv_format,
     ) -> c_int,
+> = None;
+#[cfg(target_os = "windows")]
+#[no_mangle]
+static mut pfn_mpv_command_string: Option<
+    extern "C" fn(ctx: *mut mpv_handle, args: *const c_char) -> c_int,
 > = None;
 #[cfg(target_os = "windows")]
 #[no_mangle]
@@ -281,6 +287,10 @@ pub unsafe fn mpv_observe_property(
     format: mpv_format,
 ) -> c_int {
     pfn_mpv_observe_property.unwrap()(ctx, reply_userdata, name, format)
+}
+#[cfg(target_os = "windows")]
+pub unsafe fn mpv_command_string(ctx: *mut mpv_handle, args: *const c_char) -> c_int {
+    pfn_mpv_command_string.unwrap()(ctx, args)
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_event_name(event: mpv_event_id) -> *const c_char {
