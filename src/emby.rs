@@ -1,5 +1,5 @@
 use super::utils::CLIENT;
-use anyhow::{anyhow, Context, Ok, Result};
+use anyhow::{Context, Ok, Result, anyhow};
 use regex::Regex;
 use serde::Deserialize;
 use std::fmt::Display;
@@ -104,7 +104,14 @@ impl Display for EpInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = format!(
             "[Type: {}  Name: {}  Series Name: {}  Season Number: {}  Episode Number: {}  SeriesId: {}  SeasonId: {}  Status: {}]",
-            self.r#type, self.item_info.name,self.item_info.ss_name, self.item_info.sn_index, self.item_info.ep_index, self.item_info.ss_id, self.item_info.se_id, self.status
+            self.r#type,
+            self.item_info.name,
+            self.item_info.ss_name,
+            self.item_info.sn_index,
+            self.item_info.ep_index,
+            self.item_info.ss_id,
+            self.item_info.se_id,
+            self.status
         );
 
         write!(f, "{}", str)

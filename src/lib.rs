@@ -7,7 +7,7 @@ pub mod options;
 pub mod utils;
 
 use crate::{
-    dandanplay::{get_danmaku, Danmaku, Source, Status, StatusInner},
+    dandanplay::{Danmaku, Source, Status, StatusInner, get_danmaku},
     ffi::{
         mpv_client_name, mpv_event_client_message, mpv_event_id, mpv_event_property, mpv_format,
         mpv_handle, mpv_node, mpv_observe_property, mpv_wait_event, mpv_wakeup,
@@ -18,7 +18,7 @@ use crate::{
 };
 use anyhow::anyhow;
 use mpv::expand_path;
-use rand::{thread_rng, Rng};
+use rand::{Rng, rng};
 use std::{
     collections::HashSet,
     ffi::CStr,
@@ -27,8 +27,8 @@ use std::{
     ptr::null_mut,
     slice::from_raw_parts,
     sync::{
+        Arc, LazyLock, OnceLock,
         atomic::{AtomicBool, Ordering},
-        Arc, LazyLock,
     },
 };
 use tokio::{runtime::Builder, spawn, sync::Mutex};
@@ -36,7 +36,7 @@ use tokio::{runtime::Builder, spawn, sync::Mutex};
 use tracing::Level;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::time::ChronoUtc;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 const MAX_DURATION: f64 = 12.;
 const INTERVAL: f64 = 0.005;
@@ -44,7 +44,7 @@ const MIN_STEP: f64 = INTERVAL / MAX_DURATION;
 const MAX_STEP: f64 = MIN_STEP * 1.3;
 
 pub static mut CTX: *mut mpv_handle = null_mut();
-pub static mut CLIENT_NAME: &str = "";
+pub static CLIENT_NAME: OnceLock<String> = OnceLock::new();
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static COMMENTS: LazyLock<Mutex<Option<Vec<Danmaku>>>> = LazyLock::new(|| Mutex::new(None));
@@ -57,11 +57,16 @@ struct Params {
     osd_height: f64,
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn mpv_open_cplugin(ctx: *mut mpv_handle) -> c_int {
     unsafe {
         CTX = ctx;
-        CLIENT_NAME = CStr::from_ptr(mpv_client_name(ctx)).to_str().unwrap();
+        CLIENT_NAME.get_or_init(|| {
+            CStr::from_ptr(mpv_client_name(ctx))
+                .to_str()
+                .unwrap()
+                .to_string()
+        });
     }
 
     Builder::new_multi_thread()
@@ -183,7 +188,10 @@ async fn main() -> c_int {
                         if unsafe { CStr::from_ptr(key.cast()) }
                             .to_str()
                             .is_ok_and(|key| {
-                                key == format!("{}-filter_source", unsafe { CLIENT_NAME })
+                                key == format!(
+                                    "{}-filter_source",
+                                    CLIENT_NAME.get().unwrap_or(&"".to_string())
+                                )
                             })
                         {
                             assert_eq!(value.format, mpv_format::MPV_FORMAT_STRING);
@@ -336,7 +344,7 @@ fn render(comments: &mut [Danmaku], params: Params, options: Options) {
     ];
 
     let mut danmaku = Vec::new();
-    let mut rng = thread_rng();
+    let mut rng = rng();
     'it: for comment in comments.iter_mut().filter(|c| !c.blocked) {
         let time = comment.time + params.delay;
         if time > pos {
@@ -357,7 +365,7 @@ fn render(comments: &mut [Danmaku], params: Params, options: Options) {
                             let max_step = 1. / (ticks + status.end / width / status.step);
                             max_step.min(MAX_STEP)
                         };
-                        let step = rng.gen_range(MIN_STEP..max_step);
+                        let step = rng.random_range(MIN_STEP..max_step);
                         let x = width - width * ticks * step;
                         break 'status comment.status.insert(StatusInner { x, row, step });
                     }

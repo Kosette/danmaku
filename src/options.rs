@@ -1,5 +1,5 @@
-use crate::{dandanplay::Source, log::log_error, mpv::expand_path, CLIENT_NAME};
-use anyhow::{anyhow, Result};
+use crate::{CLIENT_NAME, dandanplay::Source, log::log_error, mpv::expand_path};
+use anyhow::{Result, anyhow};
 use serde::Deserialize;
 use std::{
     collections::HashSet,
@@ -51,7 +51,10 @@ pub struct Filter {
 }
 
 pub fn read_options() -> Result<Option<(Options, Arc<Filter>)>> {
-    let path = expand_path(&format!("~~/script-opts/{}.conf", unsafe { CLIENT_NAME }))?;
+    let path = expand_path(&format!(
+        "~~/script-opts/{}.conf",
+        CLIENT_NAME.get().unwrap_or(&"".to_string())
+    ))?;
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) => {
@@ -59,7 +62,7 @@ pub fn read_options() -> Result<Option<(Options, Arc<Filter>)>> {
                 Ok(None)
             } else {
                 Err(error.into())
-            }
+            };
         }
     };
 

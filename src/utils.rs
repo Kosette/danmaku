@@ -1,5 +1,5 @@
 use crate::options;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use hex::encode;
 use md5::{Digest, Md5};
 use reqwest::Client;

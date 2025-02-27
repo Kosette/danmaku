@@ -2,15 +2,16 @@
 #![allow(invalid_value)]
 
 use crate::{
+    CTX,
     ffi::{
         mpv_command, mpv_command_node, mpv_command_ret, mpv_error_string, mpv_format, mpv_free,
         mpv_free_node_contents, mpv_get_property, mpv_node, mpv_node_list, u,
     },
-    log_code, CTX,
+    log_code,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::{
-    ffi::{c_char, CStr, CString},
+    ffi::{CStr, CString, c_char},
     mem::MaybeUninit,
     ptr::{addr_of_mut, null, null_mut},
 };

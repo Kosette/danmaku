@@ -171,34 +171,34 @@ extern "C" {
 }
 
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut pfn_mpv_error_string: Option<extern "C" fn(error: c_int) -> *const c_char> = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut pfn_mpv_free: Option<extern "C" fn(data: *mut c_void)> = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut pfn_mpv_client_name: Option<extern "C" fn(ctx: *mut mpv_handle) -> *const c_char> = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut pfn_mpv_free_node_contents: Option<extern "C" fn(node: *mut mpv_node)> = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut pfn_mpv_command: Option<
     extern "C" fn(ctx: *mut mpv_handle, args: *mut *const c_char) -> c_int,
 > = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut pfn_mpv_command_node: Option<
     extern "C" fn(ctx: *mut mpv_handle, args: *mut mpv_node, result: *mut mpv_node) -> c_int,
 > = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut pfn_mpv_command_ret: Option<
     extern "C" fn(ctx: *mut mpv_handle, args: *mut *const c_char, result: *mut mpv_node) -> c_int,
 > = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut pfn_mpv_get_property: Option<
     extern "C" fn(
         ctx: *mut mpv_handle,
@@ -208,7 +208,7 @@ static mut pfn_mpv_get_property: Option<
     ) -> c_int,
 > = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut pfn_mpv_observe_property: Option<
     extern "C" fn(
         ctx: *mut mpv_handle,
@@ -218,41 +218,41 @@ static mut pfn_mpv_observe_property: Option<
     ) -> c_int,
 > = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut pfn_mpv_command_string: Option<
     extern "C" fn(ctx: *mut mpv_handle, args: *const c_char) -> c_int,
 > = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut pfn_mpv_event_name: Option<extern "C" fn(event: mpv_event_id) -> *const c_char> = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static mut pfn_mpv_wait_event: Option<
     extern "C" fn(ctx: *mut mpv_handle, timeout: f64) -> *mut mpv_event,
 > = None;
 #[cfg(target_os = "windows")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static mut pfn_mpv_wakeup: Option<extern "C" fn(ctx: *mut mpv_handle)> = None;
 
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_error_string(error: c_int) -> *const c_char {
-    pfn_mpv_error_string.unwrap()(error)
+    unsafe { pfn_mpv_error_string.unwrap()(error) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_free(data: *mut c_void) {
-    pfn_mpv_free.unwrap()(data)
+    unsafe { pfn_mpv_free.unwrap()(data) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_client_name(ctx: *mut mpv_handle) -> *const c_char {
-    pfn_mpv_client_name.unwrap()(ctx)
+    unsafe { pfn_mpv_client_name.unwrap()(ctx) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_free_node_contents(node: *mut mpv_node) {
-    pfn_mpv_free_node_contents.unwrap()(node)
+    unsafe { pfn_mpv_free_node_contents.unwrap()(node) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_command(ctx: *mut mpv_handle, args: *mut *const c_char) -> c_int {
-    pfn_mpv_command.unwrap()(ctx, args)
+    unsafe { pfn_mpv_command.unwrap()(ctx, args) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_command_node(
@@ -260,7 +260,7 @@ pub unsafe fn mpv_command_node(
     args: *mut mpv_node,
     result: *mut mpv_node,
 ) -> c_int {
-    pfn_mpv_command_node.unwrap()(ctx, args, result)
+    unsafe { pfn_mpv_command_node.unwrap()(ctx, args, result) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_command_ret(
@@ -268,7 +268,7 @@ pub unsafe fn mpv_command_ret(
     args: *mut *const c_char,
     result: *mut mpv_node,
 ) -> c_int {
-    pfn_mpv_command_ret.unwrap()(ctx, args, result)
+    unsafe { pfn_mpv_command_ret.unwrap()(ctx, args, result) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_get_property(
@@ -277,7 +277,7 @@ pub unsafe fn mpv_get_property(
     format: mpv_format,
     data: *mut c_void,
 ) -> c_int {
-    pfn_mpv_get_property.unwrap()(ctx, name, format, data)
+    unsafe { pfn_mpv_get_property.unwrap()(ctx, name, format, data) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_observe_property(
@@ -286,21 +286,21 @@ pub unsafe fn mpv_observe_property(
     name: *const c_char,
     format: mpv_format,
 ) -> c_int {
-    pfn_mpv_observe_property.unwrap()(ctx, reply_userdata, name, format)
+    unsafe { pfn_mpv_observe_property.unwrap()(ctx, reply_userdata, name, format) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_command_string(ctx: *mut mpv_handle, args: *const c_char) -> c_int {
-    pfn_mpv_command_string.unwrap()(ctx, args)
+    unsafe { pfn_mpv_command_string.unwrap()(ctx, args) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_event_name(event: mpv_event_id) -> *const c_char {
-    pfn_mpv_event_name.unwrap()(event)
+    unsafe { pfn_mpv_event_name.unwrap()(event) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_wait_event(ctx: *mut mpv_handle, timeout: f64) -> *mut mpv_event {
-    pfn_mpv_wait_event.unwrap()(ctx, timeout)
+    unsafe { pfn_mpv_wait_event.unwrap()(ctx, timeout) }
 }
 #[cfg(target_os = "windows")]
 pub unsafe fn mpv_wakeup(ctx: *mut mpv_handle) {
-    pfn_mpv_wakeup.unwrap()(ctx)
+    unsafe { pfn_mpv_wakeup.unwrap()(ctx) }
 }

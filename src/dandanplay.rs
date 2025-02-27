@@ -1,10 +1,10 @@
-use crate::utils::{AnimeOffset, Linkage, CLIENT};
+use crate::utils::{AnimeOffset, CLIENT, Linkage};
 use crate::{
-    emby::{get_episode_info, get_series_info, EpInfo},
+    emby::{EpInfo, get_episode_info, get_series_info},
     mpv::osd_message,
     options::{self, Filter},
 };
-use anyhow::{anyhow, Ok, Result};
+use anyhow::{Ok, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{hint, sync::Arc};
@@ -351,7 +351,7 @@ async fn get_episode_id_by_hash(hash: &str, file_name: &str) -> Result<usize> {
 // shitshitshitshitshitshitshitshitshitshitshit
 //
 async fn get_episode_id_by_info(ep_info: &EpInfo, linkage: &mut Linkage) -> Result<usize> {
-    use crate::utils::{get_dan_sum, get_em_sum, SearchRes};
+    use crate::utils::{SearchRes, get_dan_sum, get_em_sum};
     use std::result::Result::Ok;
     use url::form_urlencoded;
 

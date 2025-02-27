@@ -1,18 +1,19 @@
-use crate::{ffi::mpv_error_string, CLIENT_NAME};
+use crate::{CLIENT_NAME, ffi::mpv_error_string};
 use anyhow::Error;
-use std::ffi::{c_int, CStr};
+use std::ffi::{CStr, c_int};
 
 pub fn log_code(error: c_int) {
     unsafe {
         eprintln!(
-            "[{CLIENT_NAME}] {}",
+            "[{}] {}",
+            CLIENT_NAME.get().unwrap_or(&"".to_string()),
             CStr::from_ptr(mpv_error_string(error)).to_str().unwrap()
         )
     }
 }
 
 pub fn log_error(error: &Error) {
-    unsafe { eprintln!("[{CLIENT_NAME}] {error}") }
+    eprintln!("[{}] {error}", CLIENT_NAME.get().unwrap_or(&"".to_string()))
 }
 
 // Debug
