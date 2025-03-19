@@ -136,7 +136,7 @@ pub struct mpv_event {
 }
 
 #[cfg(not(target_os = "windows"))]
-extern "C" {
+unsafe extern "C" {
     pub fn mpv_error_string(error: c_int) -> *const c_char;
     pub fn mpv_free(data: *mut c_void);
     pub fn mpv_client_name(ctx: *mut mpv_handle) -> *const c_char;

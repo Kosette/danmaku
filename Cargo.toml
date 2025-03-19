@@ -1,6 +1,6 @@
 [package]
 name = "danmaku"
-version = "1.7.60"
+version = "1.8.0"
 authors = ["rkscv", "kosette"]
 edition = "2024"
 rust-version = "1.85"
