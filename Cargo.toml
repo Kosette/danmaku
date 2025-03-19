@@ -1,6 +1,6 @@
 [package]
 name = "danmaku"
-version = "1.7.50"
+version = "1.7.60"
 authors = ["rkscv", "kosette"]
 edition = "2024"
 rust-version = "1.85"
@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1.0"
-bincode = "1.3"
+bincode = { version = "2.0", features = ["serde"] }
 futures = "0.3"
 hex = "0.4"
 md-5 = "0.10"
@@ -27,7 +27,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.43", features = ["rt-multi-thread", "sync"] }
+tokio = { version = "1.44", features = ["rt-multi-thread", "sync"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter"] }

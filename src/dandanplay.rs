@@ -87,7 +87,7 @@ impl CommentResponse {
         use std::path::Path;
         use tokio::io::AsyncWriteExt;
 
-        let encoded: Vec<u8> = bincode::serialize(self)?;
+        let encoded: Vec<u8> = bincode::serde::encode_to_vec(self, bincode::config::legacy())?;
         let path_str = expand_path(&format!("~~/files/danmaku/{}", episode_id))?;
         let path = Path::new(&path_str);
 
@@ -120,7 +120,8 @@ impl CommentResponse {
         let mut contents = vec![];
         file.read_to_end(&mut contents).await?;
 
-        let comments: CommentResponse = bincode::deserialize(&contents)?;
+        let comments: CommentResponse =
+            bincode::serde::decode_from_slice(&contents, bincode::config::legacy())?.0;
         Ok(comments)
     }
 }
